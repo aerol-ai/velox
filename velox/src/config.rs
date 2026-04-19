@@ -30,9 +30,9 @@ pub struct Client {
     /// 'tproxy+udp://[::1]:1212?timeout_sec=10'  listen locally on udp on port 1212 as a *transparent proxy* and forward dynamically requested tunnel
     ///                                           linux only and requires sudo/CAP_NET_ADMIN
     ///
-    /// 'stdio://google.com:443'         =>       listen for data from stdio, mainly for `ssh -o ProxyCommand="wstunnel client -L stdio://%h:%p ws://localhost:8080" my-server`
+    /// 'stdio://google.com:443'         =>       listen for data from stdio, mainly for `ssh -o ProxyCommand="velox client -L stdio://%h:%p ws://localhost:8080" my-server`
     ///
-    /// 'unix:///tmp/wstunnel.sock:g.com:443' =>  listen for data from unix socket of path /tmp/wstunnel.sock and forward to g.com:443
+    /// 'unix:///tmp/velox.sock:g.com:443' =>  listen for data from unix socket of path /tmp/velox.sock and forward to g.com:443
     #[cfg_attr(feature = "clap", arg(short='L', long, value_name = "{tcp,udp,socks5,stdio,unix}://[BIND:]PORT:HOST:PORT", value_parser = parsers::parse_tunnel_arg, verbatim_doc_comment))]
     pub local_to_remote: Vec<LocalToRemote>,
 
@@ -42,12 +42,12 @@ pub struct Client {
     /// 'udp://1212:1.1.1.1:53'          =>     listen on server for incoming udp on port 1212 and forward to cloudflare dns 1.1.1.1 on port 53 from local machine
     /// 'socks5://[::1]:1212'            =>     listen on server for incoming socks5 request on port 1212 and forward dynamically request from local machine (login/password is supported)
     /// 'http://[::1]:1212'         =>     listen on server for incoming http proxy request on port 1212 and forward dynamically request from local machine (login/password is supported)
-    /// 'unix://wstunnel.sock:g.com:443' =>     listen on server for incoming data from unix socket of path wstunnel.sock and forward to g.com:443 from local machine
+    /// 'unix://velox.sock:g.com:443' =>     listen on server for incoming data from unix socket of path velox.sock and forward to g.com:443 from local machine
     #[cfg_attr(feature = "clap", arg(short='R', long, value_name = "{tcp,udp,socks5,unix}://[BIND:]PORT:HOST:PORT", value_parser = parsers::parse_reverse_tunnel_arg, verbatim_doc_comment))]
     pub remote_to_local: Vec<LocalToRemote>,
 
     /// (linux only) Mark network packet with SO_MARK sockoption with the specified value.
-    /// You need to use {root, sudo, capabilities} to run wstunnel when using this option
+    /// You need to use {root, sudo, capabilities} to run velox when using this option
     #[cfg_attr(feature = "clap", arg(long, value_name = "INT", verbatim_doc_comment))]
     pub socket_so_mark: Option<u32>,
 
@@ -105,7 +105,7 @@ pub struct Client {
     )]
     pub tls_sni_disable: bool,
 
-    /// Enable ECH (encrypted sni) during TLS handshake to wstunnel server.
+    /// Enable ECH (encrypted sni) during TLS handshake to velox server.
     /// Warning: Ech DNS config is not refreshed over time. It is retrieved only once at startup of the program  
     #[cfg_attr(feature = "clap", arg(long, verbatim_doc_comment))]
     pub tls_ech_enable: bool,
@@ -131,7 +131,7 @@ pub struct Client {
     /// If set, will use this login to connect to the http proxy. Override the one from --http-proxy
     #[cfg_attr(
         feature = "clap",
-        arg(long, value_name = "LOGIN", verbatim_doc_comment, env = "WSTUNNEL_HTTP_PROXY_LOGIN")
+        arg(long, value_name = "LOGIN", verbatim_doc_comment, env = "VELOX_HTTP_PROXY_LOGIN")
     )]
     pub http_proxy_login: Option<String>,
 
@@ -142,7 +142,7 @@ pub struct Client {
             long,
             value_name = "PASSWORD",
             verbatim_doc_comment,
-            env = "WSTUNNEL_HTTP_PROXY_PASSWORD"
+            env = "VELOX_HTTP_PROXY_PASSWORD"
         )
     )]
     pub http_proxy_password: Option<String>,
@@ -150,13 +150,13 @@ pub struct Client {
     /// Use a specific prefix that will show up in the http path during the upgrade request.
     /// Useful if you need to route requests server side but don't have vhosts
     /// When using mTLS this option overrides the default behavior of using the common name of the
-    /// client's certificate. This will likely result in the wstunnel server rejecting the connection.
+    /// client's certificate. This will likely result in the velox server rejecting the connection.
     #[cfg_attr(feature = "clap", arg(
         short = 'P',
         long,
         default_value = DEFAULT_CLIENT_UPGRADE_PATH_PREFIX,
         verbatim_doc_comment,
-        env = "WSTUNNEL_HTTP_UPGRADE_PATH_PREFIX"
+        env = "VELOX_HTTP_UPGRADE_PATH_PREFIX"
     ))]
     pub http_upgrade_path_prefix: String,
 
@@ -193,19 +193,19 @@ pub struct Client {
     #[cfg_attr(feature = "clap", arg(long, value_name = "FILE_PATH", verbatim_doc_comment))]
     pub http_headers_file: Option<PathBuf>,
 
-    /// Address of the wstunnel server
+    /// Address of the velox server
     /// You can either use websocket, http2, or quic as transport protocol. Use websocket if you are unsure.
-    /// Example: For websocket with TLS wss://wstunnel.example.com or without ws://wstunnel.example.com
-    ///          For http2 with TLS https://wstunnel.example.com or without http://wstunnel.example.com
-    ///          For quic quic://wstunnel.example.com (always encrypted, requires --features quic)
+    /// Example: For websocket with TLS wss://velox.example.com or without ws://velox.example.com
+    ///          For http2 with TLS https://velox.example.com or without http://velox.example.com
+    ///          For quic quic://velox.example.com (always encrypted, requires --features quic)
     ///
     /// *WARNING* HTTP2 as transport protocol is harder to make it works because:
     ///   - If you are behind a (reverse) proxy/CDN they are going to buffer the whole request before forwarding it to the server
     ///     Obviously, this is not going to work for tunneling traffic
-    ///   - if you have wstunnel behind a reverse proxy, most of them (i.e: nginx) are going to turn http2 request into http1
+    ///   - if you have velox behind a reverse proxy, most of them (i.e: nginx) are going to turn http2 request into http1
     ///     This is not going to work, because http1 does not support streaming naturally
-    ///   - The only way to make it works with http2 is to have wstunnel directly exposed to the internet without any reverse proxy in front of it
-    #[cfg_attr(feature = "clap", arg(value_name = "ws[s]|http[s]|quic://wstunnel.server.com[:port]", value_parser = parsers::parse_server_url, verbatim_doc_comment))]
+    ///   - The only way to make it works with http2 is to have velox directly exposed to the internet without any reverse proxy in front of it
+    #[cfg_attr(feature = "clap", arg(value_name = "ws[s]|http[s]|quic://velox.server.com[:port]", value_parser = parsers::parse_server_url, verbatim_doc_comment))]
     pub remote_addr: Url,
 
     /// [Optional] Enable QUIC 0-RTT on resumed sessions.
@@ -288,7 +288,7 @@ pub struct Client {
         arg(
             long,
             default_value = "false",
-            env = "WSTUNNEL_DNS_PREFER_IPV4",
+            env = "VELOX_DNS_PREFER_IPV4",
             verbatim_doc_comment
         )
     )]
@@ -298,7 +298,7 @@ pub struct Client {
 #[derive(Debug)]
 #[cfg_attr(feature = "clap", derive(clap::Args))]
 pub struct Server {
-    /// Address of the wstunnel server to bind to
+    /// Address of the velox server to bind to
     /// Example: With TLS wss://0.0.0.0:8080 or without ws://[::]:8080
     ///
     /// The server is capable of detecting by itself if the request is websocket or http2. So you don't need to specify it.
@@ -306,7 +306,7 @@ pub struct Server {
     pub remote_addr: Url,
 
     /// (linux only) Mark network packet with SO_MARK sockoption with the specified value.
-    /// You need to use {root, sudo, capabilities} to run wstunnel when using this option
+    /// You need to use {root, sudo, capabilities} to run velox when using this option
     #[cfg_attr(feature = "clap", arg(long, value_name = "INT", verbatim_doc_comment))]
     pub socket_so_mark: Option<u32>,
 
@@ -347,7 +347,7 @@ pub struct Server {
         arg(
             long,
             default_value = "false",
-            env = "WSTUNNEL_DNS_PREFER_IPV4",
+            env = "VELOX_DNS_PREFER_IPV4",
             verbatim_doc_comment
         )
     )]
@@ -378,7 +378,7 @@ pub struct Server {
             long,
             verbatim_doc_comment,
             conflicts_with = "restrict_config",
-            env = "WSTUNNEL_RESTRICT_HTTP_UPGRADE_PATH_PREFIX"
+            env = "VELOX_RESTRICT_HTTP_UPGRADE_PATH_PREFIX"
         )
     )]
     pub restrict_http_upgrade_path_prefix: Option<Vec<String>>,
@@ -420,7 +420,7 @@ pub struct Server {
     /// If set, will use this login to connect to the http proxy. Override the one from --http-proxy
     #[cfg_attr(
         feature = "clap",
-        arg(long, value_name = "LOGIN", verbatim_doc_comment, env = "WSTUNNEL_HTTP_PROXY_LOGIN")
+        arg(long, value_name = "LOGIN", verbatim_doc_comment, env = "VELOX_HTTP_PROXY_LOGIN")
     )]
     pub http_proxy_login: Option<String>,
 
@@ -431,7 +431,7 @@ pub struct Server {
             long,
             value_name = "PASSWORD",
             verbatim_doc_comment,
-            env = "WSTUNNEL_HTTP_PROXY_PASSWORD"
+            env = "VELOX_HTTP_PROXY_PASSWORD"
         )
     )]
     pub http_proxy_password: Option<String>,

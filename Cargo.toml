@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 
-members = ["wstunnel", "wstunnel-cli"]
+members = ["velox", "velox-cli"]
 
 [workspace.dependencies]
 

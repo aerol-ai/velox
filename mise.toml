@@ -21,7 +21,7 @@ run = """
 """
 
 [tasks.docker-release]
-description = "Build and push wstunnel docker image"
+description = "Build and push velox docker image"
 usage = '''
 arg "image_tag" "tag of the image"
 '''
@@ -31,18 +31,18 @@ run = """
   docker buildx use builder
   docker buildx build \
     --platform linux/arm/v7,linux/arm64,linux/amd64 \
-    --cache-from type=registry,ref=ghcr.io/erebe/wstunnel:cache \
-    --cache-to type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ref=ghcr.io/erebe/wstunnel:cache \
-    -t ghcr.io/erebe/wstunnel:{{arg(name="image_tag")}} \
-    -t ghcr.io/erebe/wstunnel:latest \
+    --cache-from type=registry,ref=ghcr.io/aerol-ai/velox:cache \
+    --cache-to type=registry,mode=max,image-manifest=true,oci-mediatypes=true,ref=ghcr.io/aerol-ai/velox:cache \
+    -t ghcr.io/aerol-ai/velox:{{arg(name="image_tag")}} \
+    -t ghcr.io/aerol-ai/velox:latest \
     --push .
   docker buildx rm builder
 """
 
 [tasks.publish-release]
-description = "Push a new release of wstunnel"
+description = "Push a new release of velox"
 usage = '''
-arg "version" "version of wstunnel to release"
+arg "version" "version of velox to release"
 flag "-f --force" default=""
 '''
 run = """
@@ -50,11 +50,11 @@ if [ '{{flag(name="force")}}' = 'true' ]; then
   export FORCE="-f"
 fi
 
-sed -i 's/^version = .*/version = "{{arg(name="version")}}"/g' wstunnel-cli/Cargo.toml wstunnel/Cargo.toml
+sed -i 's/^version = .*/version = "{{arg(name="version")}}"/g' velox-cli/Cargo.toml velox/Cargo.toml
 cargo fmt --all -- --check --color=always || (echo "Use cargo fmt to format your code"; exit 1)
 cargo clippy --all -- -D warnings || (echo "Solve your clippy warnings to succeed"; exit 1)
 
-git add wstunnel/Cargo.* wstunnel-cli/Cargo.* Cargo.*
+git add velox/Cargo.* velox-cli/Cargo.* Cargo.*
 git commit -m 'Bump version v'$usage_version
 git tag $FORCE v$usage_version -m 'version v'$usage_version
 git push $FORCE

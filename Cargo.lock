@@ -3959,6 +3959,81 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
+name = "velox"
+version = "10.5.2"
+dependencies = [
+ "ahash",
+ "anyhow",
+ "arc-swap",
+ "async-channel",
+ "aws-lc-rs",
+ "base64 0.22.1",
+ "bb8",
+ "bytes",
+ "clap",
+ "collection_macros",
+ "crossterm",
+ "derive_more",
+ "fast-socks5",
+ "fastwebsockets",
+ "futures-util",
+ "get_if_addrs",
+ "hickory-resolver",
+ "http-body-util",
+ "httparse",
+ "hyper",
+ "hyper-util",
+ "ipnet",
+ "jsonwebtoken",
+ "log",
+ "nix",
+ "notify",
+ "parking_lot",
+ "pin-project",
+ "ppp",
+ "quinn",
+ "rcgen",
+ "regex",
+ "rstest",
+ "rustls-native-certs",
+ "rustls-pemfile",
+ "scopeguard",
+ "serde",
+ "serde_json",
+ "serde_regex",
+ "serde_yaml",
+ "serial_test",
+ "socket2 0.6.2",
+ "test-case",
+ "testcontainers",
+ "tokio",
+ "tokio-fd",
+ "tokio-rustls",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "url",
+ "urlencoding",
+ "uuid",
+ "x509-parser",
+]
+
+[[package]]
+name = "velox-cli"
+version = "10.5.2"
+dependencies = [
+ "anyhow",
+ "clap",
+ "fdlimit",
+ "tikv-jemallocator",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "velox",
+]
+
+[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4509,81 +4584,6 @@ name = "writeable"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9edde0db4769d2dc68579893f2306b26c6ecfbe0ef499b013d731b7b9247e0b9"
-
-[[package]]
-name = "wstunnel"
-version = "10.5.2"
-dependencies = [
- "ahash",
- "anyhow",
- "arc-swap",
- "async-channel",
- "aws-lc-rs",
- "base64 0.22.1",
- "bb8",
- "bytes",
- "clap",
- "collection_macros",
- "crossterm",
- "derive_more",
- "fast-socks5",
- "fastwebsockets",
- "futures-util",
- "get_if_addrs",
- "hickory-resolver",
- "http-body-util",
- "httparse",
- "hyper",
- "hyper-util",
- "ipnet",
- "jsonwebtoken",
- "log",
- "nix",
- "notify",
- "parking_lot",
- "pin-project",
- "ppp",
- "quinn",
- "rcgen",
- "regex",
- "rstest",
- "rustls-native-certs",
- "rustls-pemfile",
- "scopeguard",
- "serde",
- "serde_json",
- "serde_regex",
- "serde_yaml",
- "serial_test",
- "socket2 0.6.2",
- "test-case",
- "testcontainers",
- "tokio",
- "tokio-fd",
- "tokio-rustls",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "url",
- "urlencoding",
- "uuid",
- "x509-parser",
-]
-
-[[package]]
-name = "wstunnel-cli"
-version = "10.5.2"
-dependencies = [
- "anyhow",
- "clap",
- "fdlimit",
- "tikv-jemallocator",
- "tokio",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "wstunnel",
-]
 
 [[package]]
 name = "x509-parser"

@@ -1,4 +1,4 @@
-# wstunnel architecture
+# velox architecture
 
 End-to-end reference for how the CLI and the server work, and a catalogue of the use cases currently covered.
 
@@ -7,7 +7,7 @@ End-to-end reference for how the CLI and the server work, and a catalogue of the
 ## 1. 10,000-foot view
 
 ```
- Local app                Client (wstunnel client)              Server (wstunnel server)            Remote target
+ Local app                Client (velox client)              Server (velox server)            Remote target
  ─────────                ───────────────────────────           ────────────────────────            ─────────────
    TCP / UDP / Unix   ─►  Listener  ──►  WsClient pool     ──►  TLS acceptor ──► WS/H2 upgrade ──►  Connector ──► TCP / UDP / SOCKS5 / Unix
    Stdio / SOCKS5         (per -L arg)   JWT-in-upgrade          Restriction check  │                (per tunnel request)
@@ -34,17 +34,17 @@ Every tunnel, forward or reverse, is the same assembly line:
 
 ## 2. The CLI
 
-### 2.1 Binary: `wstunnel-cli/src/main.rs`
+### 2.1 Binary: `velox-cli/src/main.rs`
 
-- `#[tokio::main] async fn main()` parses `Wstunnel { commands: Client | Server }` via clap (`derive` + `env`).
+- `#[tokio::main] async fn main()` parses `Velox { commands: Client | Server }` via clap (`derive` + `env`).
 - Bumps soft fd limit to hard via `fdlimit::raise_fd_limit()`.
 - Configures `tracing_subscriber` from `RUST_LOG` / `--log-lvl`. Forces `h2::codec=off` unless the user overrides.
 - If any `-L` is `stdio://…`, logs go to **stderr** (stdout is tunnel data).
-- Dispatches to `wstunnel::run_client(args, DefaultTokioExecutor)` or `wstunnel::run_server(args, …)`.
+- Dispatches to `velox::run_client(args, DefaultTokioExecutor)` or `velox::run_server(args, …)`.
 
-### 2.2 Clap config: `wstunnel/src/config.rs`
+### 2.2 Clap config: `velox/src/config.rs`
 
-- `Client` and `Server` are `#[derive(clap::Args)]` on the `clap` feature (enabled from `wstunnel-cli`).
+- `Client` and `Server` are `#[derive(clap::Args)]` on the `clap` feature (enabled from `velox-cli`).
 - Custom parsers (`parsers::parse_tunnel_arg`, `parse_reverse_tunnel_arg`, `parse_duration_sec`, `parse_sni_override`, etc.) convert URL-style flags into typed values:
   - `tcp://BIND:PORT:HOST:PORT[?proxy_protocol]`
   - `udp://…?timeout_sec=N`
@@ -60,14 +60,14 @@ Every tunnel, forward or reverse, is the same assembly line:
 ### 2.3 Subcommands
 
 Two verbs only:
-- `wstunnel client <ws[s]|http[s]|quic://server> [-L ...]... [-R ...]... [options]`
-- `wstunnel server <ws[s]://bind> [--quic-bind addr:port] [options]`
+- `velox client <ws[s]|http[s]|quic://server> [-L ...]... [-R ...]... [options]`
+- `velox server <ws[s]://bind> [--quic-bind addr:port] [options]`
 
-There is no `--config` top-level file; configuration is purely flags + environment (`HTTP_PROXY`, `NO_COLOR`, `RUST_LOG`, `TOKIO_WORKER_THREADS`, `WSTUNNEL_HTTP_PROXY_LOGIN`/`PASSWORD`, `WSTUNNEL_HTTP_UPGRADE_PATH_PREFIX`, `WSTUNNEL_RESTRICT_HTTP_UPGRADE_PATH_PREFIX`).
+There is no `--config` top-level file; configuration is purely flags + environment (`HTTP_PROXY`, `NO_COLOR`, `RUST_LOG`, `TOKIO_WORKER_THREADS`, `VELOX_HTTP_PROXY_LOGIN`/`PASSWORD`, `VELOX_HTTP_UPGRADE_PATH_PREFIX`, `VELOX_RESTRICT_HTTP_UPGRADE_PATH_PREFIX`).
 
 ---
 
-## 3. Client runtime (`wstunnel/src/lib.rs::run_client` + `tunnel/client/`)
+## 3. Client runtime (`velox/src/lib.rs::run_client` + `tunnel/client/`)
 
 ### 3.1 Bootstrap — `create_client`
 
@@ -127,7 +127,7 @@ Watches `tls_certificate_path` / `tls_key_path` / `tls_client_ca_certs_path` usi
 
 ---
 
-## 4. Server runtime (`wstunnel/src/lib.rs::run_server_impl` + `tunnel/server/`)
+## 4. Server runtime (`velox/src/lib.rs::run_server_impl` + `tunnel/server/`)
 
 ### 4.1 Bootstrap
 
@@ -229,7 +229,7 @@ Built on `quinn` (pure-Rust QUIC over `tokio`). Uses a **single long-lived QUIC 
 
 **Wire format per bi-stream (client → server header):**
 ```
-[preamble: "WSTUNNEL/1\n" (11 bytes)]
+[preamble: "VELOX/1\n" (11 bytes)]
 [u16 BE path_prefix_len][path_prefix]
 [u16 BE jwt_len][jwt]
 [u16 BE auth_len][authorization]      // empty = absent
@@ -242,7 +242,7 @@ Built on `quinn` (pure-Rust QUIC over `tokio`). Uses a **single long-lived QUIC 
 
 **Server → client response header:**
 ```
-[preamble: "WSTUNNEL/1\n" (11 bytes)]
+[preamble: "VELOX/1\n" (11 bytes)]
 [u8 status]                           // 0 = OK, 1 = bad request, 2 = forbidden, 3 = internal error
 [u16 BE reason_len][reason]
 [u16 BE cookie_len][cookie]           // JWT for dynamic reverse tunnels
@@ -250,7 +250,7 @@ Built on `quinn` (pure-Rust QUIC over `tokio`). Uses a **single long-lived QUIC 
 
 **UDP tunnels** use QUIC DATAGRAM frames (RFC 9221) instead of streams. Each UDP flow gets a `flow_id` (u32). The `QuicDatagramHub` per connection demultiplexes incoming datagrams by flow_id using a `HashMap<u32, mpsc::Sender<Bytes>>` protected by a `parking_lot::Mutex`. Wire: `u32 BE flow_id || payload`.
 
-**ALPN**: `wstunnel` (constant `QUIC_ALPN`).
+**ALPN**: `velox` (constant `QUIC_ALPN`).
 
 **mTLS over QUIC**: `extract_restrict_path_prefix` reads the CN from `connection.peer_identity()` (same logic as TLS).
 
@@ -302,7 +302,7 @@ Trait-based executor abstraction so the library can be driven by a custom spawn 
 | `aws-lc-rs` (default)| rustls + rcgen + jsonwebtoken backed by AWS-LC. Required for ECH.                        |
 | `ring`               | Alternative crypto backend. Needed on some musl / Android / freebsd cross targets.       |
 | `aws-lc-rs-bindgen`  | Forces aws-lc-rs to use bindgen (for targets without prebuilt bindings).                 |
-| `clap` (wstunnel lib)| Derives CLI args on `Client` / `Server`. Always on when built from `wstunnel-cli`.       |
+| `clap` (velox lib)| Derives CLI args on `Client` / `Server`. Always on when built from `velox-cli`.       |
 | `quic`               | Enables QUIC transport via `quinn`. Adds `--features quic` to CLI; `quic://` URL scheme. |
 | `jemalloc` (cli)     | Swaps the global allocator to `tikv-jemallocator`. Used in release/Docker builds.        |
 
@@ -321,14 +321,14 @@ Drawn from the README, CLI help, `config.rs`, `restrictions.yaml`, and the modul
 5. **HTTP CONNECT proxy** — `http://BIND:PORT[?login=&password=]`. Same as SOCKS5 but via HTTP proxy protocol.
 6. **Transparent proxy TCP (Linux)** — `tproxy+tcp://BIND:PORT`. Redirect arbitrary TCP via iptables TPROXY or tools like `cproxy`.
 7. **Transparent proxy UDP (Linux)** — `tproxy+udp://BIND:PORT[?timeout_sec=]`. Same for UDP.
-8. **Stdio forward** — `stdio://HOST:PORT`. One-shot pipe over stdin/stdout; ideal for `ssh -o ProxyCommand="wstunnel client … -L stdio://%h:%p …"`.
+8. **Stdio forward** — `stdio://HOST:PORT`. One-shot pipe over stdin/stdout; ideal for `ssh -o ProxyCommand="velox client … -L stdio://%h:%p …"`.
 9. **Unix socket forward** — `unix:///path/to.sock:HOST:PORT[?proxy_protocol]` (Unix only).
 
 ### 8.2 Reverse tunnels (`-R`)
 
 10. **Reverse TCP** — `tcp://BIND:PORT:HOST:PORT`. Server listens, client dials locally. Useful for exposing a laptop-local service behind NAT.
 11. **Reverse UDP** — `udp://…`. Reverse equivalent for UDP.
-12. **Reverse SOCKS5** — `socks5://…[?login=&password=]`. Clients on the server's network get a SOCKS5 egress that tunnels back to the wstunnel-client's machine.
+12. **Reverse SOCKS5** — `socks5://…[?login=&password=]`. Clients on the server's network get a SOCKS5 egress that tunnels back to the velox-client's machine.
 13. **Reverse HTTP proxy** — `http://…[?login=&password=]`. Same, as HTTP CONNECT.
 14. **Reverse Unix socket** — `unix://BIND_SOCKET:HOST:PORT`. Server creates a unix socket, bytes end up on the client side connecting to HOST:PORT.
 15. **Reverse tunnels with port mapping** — `port_mapping` in `restrictions.yaml` rewrites the server-side bind port (e.g. client requests port 10001, server actually binds 8080).
@@ -384,7 +384,7 @@ Drawn from the README, CLI help, `config.rs`, `restrictions.yaml`, and the modul
 ### 8.10 Platform / deployment
 
 39. **Standalone static binaries** — musl x86_64, x86, aarch64, armv7hf, armv6, Android aarch64/armv7, FreeBSD x86/x86_64 (see `.github/workflows/release.yaml`).
-40. **Docker image** — `ghcr.io/erebe/wstunnel:latest`. Entry point runs `wstunnel server ${SERVER_PROTOCOL}://${SERVER_LISTEN}:${SERVER_PORT}`.
+40. **Docker image** — `ghcr.io/aerol-ai/velox:latest`. Entry point runs `velox server ${SERVER_PROTOCOL}://${SERVER_LISTEN}:${SERVER_PORT}`.
 41. **jemalloc build** — `--features=jemalloc` for better allocator behavior on server workloads.
 42. **Windows support** — stdio uses `crossterm` shim; tproxy/unix/SO_MARK disabled.
 43. **Raspberry Pi (armv7)** — supported as a first-class target; was a reason for the Haskell → Rust rewrite.
@@ -396,7 +396,7 @@ Drawn from the README, CLI help, `config.rs`, `restrictions.yaml`, and the modul
 
 ### 8.12 Library embedding
 
-46. **`wstunnel` as a Rust library** — `run_client`, `run_server`, `create_client` are `pub`; `WsClient`, `WsServer`, `WsClientConfig`, `WsServerConfig`, `LocalProtocol`, `TlsClientConfig` are re-exported. Custom executor via `TokioExecutor` trait lets embedders control task spawning.
+46. **`velox` as a Rust library** — `run_client`, `run_server`, `create_client` are `pub`; `WsClient`, `WsServer`, `WsClientConfig`, `WsServerConfig`, `LocalProtocol`, `TlsClientConfig` are re-exported. Custom executor via `TokioExecutor` trait lets embedders control task spawning.
 
 ### 8.13 QUIC-specific tuning
 

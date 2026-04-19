@@ -4,10 +4,10 @@ use std::str::FromStr;
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::filter::Directive;
-use wstunnel::LocalProtocol;
-use wstunnel::config::{Client, Server};
-use wstunnel::executor::DefaultTokioExecutor;
-use wstunnel::{run_client, run_server};
+use velox::LocalProtocol;
+use velox::config::{Client, Server};
+use velox::executor::DefaultTokioExecutor;
+use velox::{run_client, run_server};
 
 #[cfg(feature = "jemalloc")]
 use tikv_jemallocator::Jemalloc;
@@ -17,10 +17,10 @@ use tikv_jemallocator::Jemalloc;
 static GLOBAL: Jemalloc = Jemalloc;
 
 /// Use Websocket or HTTP2 protocol to tunnel {TCP,UDP} traffic
-/// wsTunnelClient <---> wsTunnelServer <---> RemoteHost
+/// veloxClient <---> veloxServer <---> RemoteHost
 #[derive(clap::Parser, Debug)]
 #[command(author, version, about, verbatim_doc_comment, long_about = None)]
-pub struct Wstunnel {
+pub struct Velox {
     #[command(subcommand)]
     commands: Commands,
 
@@ -61,7 +61,7 @@ pub enum Commands {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args = Wstunnel::parse();
+    let args = Velox::parse();
 
     // Setup logging
     let mut env_filter = EnvFilter::builder().parse(&args.log_lvl).expect("Invalid log level");
@@ -97,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
             run_client(*args, DefaultTokioExecutor::default())
                 .await
                 .unwrap_or_else(|err| {
-                    panic!("Cannot start wstunnel client: {err:?}");
+                    panic!("Cannot start velox client: {err:?}");
                 });
         }
         Commands::Server(args) => {
@@ -126,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
 
             let serve_fut = async move {
                 if let Err(err) = run_server(*args, executor_clone.clone(), shutdown.clone()).await {
-                    panic!("Cannot start wstunnel server: {err:?}");
+                    panic!("Cannot start velox server: {err:?}");
                 }
                 executor_clone.wait().await;
             };

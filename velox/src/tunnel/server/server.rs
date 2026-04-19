@@ -347,7 +347,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
     }
 
     pub async fn serve(self, restrictions: RestrictionsRules, shutdown: tokio_util::sync::CancellationToken) -> anyhow::Result<()> {
-        info!("Starting wstunnel server listening on {}", self.config.bind);
+        info!("Starting velox server listening on {}", self.config.bind);
 
         // setup upgrade request handler
         let mk_websocket_upgrade_fn = |server: WsServer<_>,
@@ -540,7 +540,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                                     mk_websocket_upgrade_fn(server, restrictions, restrict_path, peer_addr, shutdown_for_conn.clone());
                                 let conn_fut = http1::Builder::new()
                                     .timer(TokioTimer::new())
-                                    // https://github.com/erebe/wstunnel/issues/358
+                                    // https://github.com/aerol-ai/velox/issues/358
                                     // disabled, to avoid conflict with --connection-min-idle flag, that open idle connections
                                     .header_read_timeout(None)
                                     .serve_connection(tls_stream, service_fn(websocket_upgrade_fn))

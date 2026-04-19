@@ -1,13 +1,13 @@
 # Missing / not-yet-covered use cases
 
-Observations about gaps in wstunnel's feature set today (v10.5.2). Each entry names what is missing, what the current workaround is, and a rough sketch of where an implementation would live. Items are ordered by apparent user value, not by implementation cost.
+Observations about gaps in velox's feature set today (v10.5.2). Each entry names what is missing, what the current workaround is, and a rough sketch of where an implementation would live. Items are ordered by apparent user value, not by implementation cost.
 
 ---
 
 ## Authentication & authorization
 
 ### 1. Real JWT signature verification
-**Today:** `wstunnel/src/tunnel/transport/jwt.rs` creates a per-process HMAC key and then calls `validation.insecure_disable_signature_validation()` on decode. The JWT is a structured envelope, not an auth token. Anyone who reaches the server can mint any claims they want.
+**Today:** `velox/src/tunnel/transport/jwt.rs` creates a per-process HMAC key and then calls `validation.insecure_disable_signature_validation()` on decode. The JWT is a structured envelope, not an auth token. Anyone who reaches the server can mint any claims they want.
 **Workaround:** `--http-upgrade-path-prefix` (shared secret in the URL) or mTLS.
 **Gap:** no built-in HMAC-secret or RSA/EC-based client auth. A `--jwt-secret`/`--jwt-public-key` pair on both sides would close the loop.
 
@@ -44,8 +44,8 @@ Observations about gaps in wstunnel's feature set today (v10.5.2). Each entry na
 ## Config & operations
 
 ### 8. Config file for the CLI
-**Today:** `wstunnel` only takes flags and env vars; `restrictions.yaml` is the only config file. Heavy invocations (many `-L`/`-R`, TLS, headers file) become unwieldy shell commands.
-**Gap:** `--config wstunnel.yaml` parsing `Client`/`Server` into one file. Most of the plumbing is there because `Client`/`Server` already derive `Debug` + are `Clone` — add `Deserialize`.
+**Today:** `velox` only takes flags and env vars; `restrictions.yaml` is the only config file. Heavy invocations (many `-L`/`-R`, TLS, headers file) become unwieldy shell commands.
+**Gap:** `--config velox.yaml` parsing `Client`/`Server` into one file. Most of the plumbing is there because `Client`/`Server` already derive `Debug` + are `Clone` — add `Deserialize`.
 
 ### 9. Systemd / graceful shutdown
 **Today:** `main.rs` handles `ctrl_c` only in the stdio path. The server's accept loop is `loop {}`—no SIGTERM handler, no drain, no "finish in-flight tunnels then exit".
@@ -69,7 +69,7 @@ Observations about gaps in wstunnel's feature set today (v10.5.2). Each entry na
 
 ### 13. Raw-TCP obfuscated transport
 **Today:** WS and H/2 only.
-**Gap:** a `tcp://` transport for when the wstunnel server can be exposed directly and the HTTP framing overhead is pure loss.
+**Gap:** a `tcp://` transport for when the velox server can be exposed directly and the HTTP framing overhead is pure loss.
 
 ### 14. Multiplexing over one TCP connection
 **Today:** each tunnel opens its own HTTP upgrade (or reuses a pooled idle WS). There is no per-connection mux — pooling helps throughput but wastes a TCP+TLS handshake every time the pool is cold.
@@ -113,7 +113,7 @@ Observations about gaps in wstunnel's feature set today (v10.5.2). Each entry na
 
 ### 22. Reverse HTTP with vhosts
 **Today:** `ReverseHttpProxy` is a reverse HTTP-CONNECT proxy, not an HTTP vhost router. You can't say "requests to `foo.example.com` go to client A, `bar.example.com` to client B".
-**Gap:** a new reverse mode that parses the `Host:` header and routes by hostname — would turn wstunnel into an ngrok-style named-host exposer.
+**Gap:** a new reverse mode that parses the `Host:` header and routes by hostname — would turn velox into an ngrok-style named-host exposer.
 
 ### 23. TLS-terminated reverse tunnels
 **Today:** reverse tunnels expose raw TCP on the server. If you want TLS on the public side, put a reverse proxy in front.
@@ -136,7 +136,7 @@ Observations about gaps in wstunnel's feature set today (v10.5.2). Each entry na
 **Gap:** optional stapling for Let's Encrypt deployments.
 
 ### 27. Post-quantum key exchange
-**Today:** rustls defaults only. aws-lc-rs does expose Kyber hybrids but wstunnel doesn't opt into the hybrid suites.
+**Today:** rustls defaults only. aws-lc-rs does expose Kyber hybrids but velox doesn't opt into the hybrid suites.
 **Gap:** an explicit `--tls-kx` knob.
 
 ---
@@ -176,12 +176,12 @@ Observations about gaps in wstunnel's feature set today (v10.5.2). Each entry na
 ## Developer / ecosystem
 
 ### 34. Stable public library API
-**Today:** `wstunnel` is published as a path dep only (see `wstunnel-cli/Cargo.toml`). `LocalProtocol` is `pub` but many supporting types (`TransportAddr`, `Socks5TunnelListener`, etc.) are `pub` inside private modules — subject to change at any release.
-**Gap:** publish `wstunnel` on crates.io with a documented surface.
+**Today:** `velox` is published as a path dep only (see `velox-cli/Cargo.toml`). `LocalProtocol` is `pub` but many supporting types (`TransportAddr`, `Socks5TunnelListener`, etc.) are `pub` inside private modules — subject to change at any release.
+**Gap:** publish `velox` on crates.io with a documented surface.
 
 ### 35. Language bindings
 **Today:** Rust library only.
-**Gap:** a thin C ABI (`wstunnel-sys`) would unlock iOS/Android embedding and browser extensions — mobile is already a target in CI via Android builds.
+**Gap:** a thin C ABI (`velox-sys`) would unlock iOS/Android embedding and browser extensions — mobile is already a target in CI via Android builds.
 
 ### 36. `#[tokio::test]`-friendly test harness
 **Today:** integration tests bind fixed `127.0.0.1:9998/9999` and are `#[serial]`. Running a subset or parallelizing requires careful test selection.
@@ -197,10 +197,10 @@ Observations about gaps in wstunnel's feature set today (v10.5.2). Each entry na
 
 ### 38. Diagnostic "doctor" subcommand
 **Today:** troubleshooting a broken setup means reading tracing logs and knowing the JWT+path-prefix+restriction flow.
-**Gap:** `wstunnel doctor --server wss://…` that does a dry-run connect and prints why it would be rejected.
+**Gap:** `velox doctor --server wss://…` that does a dry-run connect and prints why it would be rejected.
 
 ### 39. Restriction-file validator
-**Today:** parse errors surface at first connection or at startup, but there is no `wstunnel validate-config restrictions.yaml`.
+**Today:** parse errors surface at first connection or at startup, but there is no `velox validate-config restrictions.yaml`.
 **Gap:** a subcommand that parses and prints the effective ruleset.
 
 ### 40. Machine-readable CLI help

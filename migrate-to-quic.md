@@ -1,4 +1,4 @@
-# Migrating wstunnel to QUIC
+# Migrating velox to QUIC
 
 Plan for adding QUIC as a first-class transport alongside WebSocket and HTTP/2, plus the use cases that open up once QUIC is in the picture.
 
@@ -6,9 +6,9 @@ Plan for adding QUIC as a first-class transport alongside WebSocket and HTTP/2, 
 
 ## 1. Why QUIC at all
 
-wstunnel today carries tunnel bytes over `ws://`, `wss://`, `http://`, or `https://` (see `wstunnel/src/tunnel/transport/{websocket,http2}.rs`). Those transports share three structural limits:
+velox today carries tunnel bytes over `ws://`, `wss://`, `http://`, or `https://` (see `velox/src/tunnel/transport/{websocket,http2}.rs`). Those transports share three structural limits:
 
-- **TCP head-of-line blocking** — one lost packet on the underlying TCP stream stalls every tunnel sharing that connection, so wstunnel avoids multiplexing and keeps a `bb8::Pool<WsConnection>` of parallel TCP sockets (`wstunnel/src/tunnel/client/cnx_pool.rs`) instead.
+- **TCP head-of-line blocking** — one lost packet on the underlying TCP stream stalls every tunnel sharing that connection, so velox avoids multiplexing and keeps a `bb8::Pool<WsConnection>` of parallel TCP sockets (`velox/src/tunnel/client/cnx_pool.rs`) instead.
 - **No connection migration** — a phone switching from Wi-Fi to LTE tears down every active tunnel; the client has to reconnect each pooled socket and re-do TCP + TLS handshakes.
 - **Sequential handshakes** — every new transport connection pays one TCP RTT plus one full TLS handshake. The pool pre-warms this, but cold starts still cost 2–3 RTTs.
 
@@ -46,7 +46,7 @@ Three mature Rust QUIC stacks:
 
 **Pick `quinn`.** It reuses the rustls `ClientConfig` / `ServerConfig` we already build in `protocols/tls.rs`, it already has `aws-lc-rs` and `ring` feature parity with the rest of the tree, and it supports everything in §2 goals out of the box.
 
-Dependencies to add to `wstunnel/Cargo.toml`:
+Dependencies to add to `velox/Cargo.toml`:
 
 ```toml
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls"] }
@@ -61,7 +61,7 @@ We keep the existing JWT envelope + `LocalProtocol` enum. What changes is the fr
 
 ### 4.1 Control stream
 - On connect, the client opens **bi-stream 0** as the control stream.
-- Sends a fixed header: `"WSTUNNEL/1 QUIC\n"` + length-prefixed JSON block containing the client's preferred options (same things that today ride in HTTP headers: upgrade path prefix, custom headers, basic auth).
+- Sends a fixed header: `"VELOX/1 QUIC\n"` + length-prefixed JSON block containing the client's preferred options (same things that today ride in HTTP headers: upgrade path prefix, custom headers, basic auth).
 - Server replies with `OK` or an error code — mirroring today's HTTP status behavior so restrictions can reject early.
 
 ### 4.2 Per-tunnel streams
@@ -95,7 +95,7 @@ Same as today: the server opens a *new* bi-stream **to the client** (QUIC is sym
 New files:
 
 ```
-wstunnel/src/tunnel/transport/
+velox/src/tunnel/transport/
     quic.rs          # Connect / accept + stream framing
     quic_datagram.rs # DATAGRAM flow multiplexer for UDP tunnels
 ```
@@ -103,14 +103,14 @@ wstunnel/src/tunnel/transport/
 Modified files:
 
 ```
-wstunnel/src/tunnel/transport/types.rs    # Add TransportScheme::Quic
-wstunnel/src/tunnel/transport/mod.rs      # Export quic::connect / accept
-wstunnel/src/tunnel/client/client.rs      # Branch in connect_to_server on Quic scheme
-wstunnel/src/tunnel/client/cnx_pool.rs    # Bypass pool for QUIC (single connection)
-wstunnel/src/tunnel/server/server.rs      # Second accept task for QUIC endpoint
-wstunnel/src/tunnel/server/handler_quic.rs  # New handler analogous to handler_websocket
-wstunnel/src/config.rs                    # Parser for quic://, CLI flags
-wstunnel/src/protocols/tls.rs             # Build quinn rustls config from existing tls_connector
+velox/src/tunnel/transport/types.rs    # Add TransportScheme::Quic
+velox/src/tunnel/transport/mod.rs      # Export quic::connect / accept
+velox/src/tunnel/client/client.rs      # Branch in connect_to_server on Quic scheme
+velox/src/tunnel/client/cnx_pool.rs    # Bypass pool for QUIC (single connection)
+velox/src/tunnel/server/server.rs      # Second accept task for QUIC endpoint
+velox/src/tunnel/server/handler_quic.rs  # New handler analogous to handler_websocket
+velox/src/config.rs                    # Parser for quic://, CLI flags
+velox/src/protocols/tls.rs             # Build quinn rustls config from existing tls_connector
 ```
 
 ### 5.1 Config surface
@@ -203,7 +203,7 @@ Total: ~4 weeks of focused work to "good enough to ship opt-in", another ~2 week
 
 ## 9. Open questions / follow-ups
 
-- **HTTP/3 compatibility mode.** Some environments only allow "HTTPS-looking" traffic. Wrapping wstunnel's streams in HTTP/3 `CONNECT` would let it live behind an ALB / Cloudflare that speaks H/3. Defer until there's a concrete ask.
+- **HTTP/3 compatibility mode.** Some environments only allow "HTTPS-looking" traffic. Wrapping velox's streams in HTTP/3 `CONNECT` would let it live behind an ALB / Cloudflare that speaks H/3. Defer until there's a concrete ask.
 - **MASQUE (CONNECT-UDP, CONNECT-IP).** Would replace `LocalProtocol::Udp` framing with a standardized one — useful if a MASQUE-speaking proxy sits in front.
 - **Unreliable-reverse-tunnel fairness.** DATAGRAM frames share one congestion controller; a chatty UDP tunnel can starve others. Consider per-flow pacing.
 - **Key rotation.** QUIC supports key updates every N packets; quinn handles this automatically, but we should document the behavior.
@@ -244,7 +244,7 @@ Concrete scenarios that either become possible or get materially better once the
 
 15. **Reduced tail latency on bursty workloads** — stream-level congestion isolation keeps a big file transfer on one stream from blowing out interactive SSH latency on another.
 
-16. **Server preferred-address failover** — QUIC lets the server advertise a backup address mid-connection; clients migrate to it transparently. Useful for blue/green deploys of a wstunnel server without dropping tunnels.
+16. **Server preferred-address failover** — QUIC lets the server advertise a backup address mid-connection; clients migrate to it transparently. Useful for blue/green deploys of a velox server without dropping tunnels.
 
 17. **Reconnection without re-auth** — resumption tickets carry the mTLS / JWT context, so post-suspend reconnects skip cert validation and restriction-matching work on the server hot path.
 

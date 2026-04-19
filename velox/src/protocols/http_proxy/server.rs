@@ -111,7 +111,7 @@ async fn handle_new_connection(
 
         // it is possible that the data is not yet available to us.
         // ideally, we should delay and retry the call until we have read enough bytes, or deadline elapsed.
-        // But in practice and for the case of wstunnel, it is an edge case not worth handling.
+        // But in practice and for the case of velox, it is an edge case not worth handling.
         // So we parse what we have and reject the request if not enough bytes already.
         let buf_size = stream.peek(&mut request_buf).await.ok()?;
 

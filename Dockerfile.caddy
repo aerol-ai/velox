@@ -1,0 +1,20 @@
+# Dockerfile.caddy
+#
+# Builds a custom Caddy image that includes the Cloudflare DNS plugin.
+# This is required for DNS-01 ACME challenges, which are the only way to
+# obtain wildcard TLS certificates (e.g. *.velox.aerol.ai).
+#
+# Build is done by docker compose automatically:  docker compose up -d
+# Manual build & test:  docker build -f Dockerfile.caddy -t caddy-cf .
+
+FROM caddy:2-builder AS builder
+
+# xcaddy compiles Caddy from source with additional plugins.
+# caddy-dns/cloudflare adds the `dns cloudflare` tls block directive.
+RUN xcaddy build \
+    --with github.com/caddy-dns/cloudflare
+
+FROM caddy:2-alpine
+
+# Replace the stock caddy binary with our plugin-enabled build.
+COPY --from=builder /usr/bin/caddy /usr/bin/caddy

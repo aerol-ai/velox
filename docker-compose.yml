@@ -6,10 +6,14 @@
 #                      Caddy cannot proxy UDP/QUIC)
 #
 # Quick start:
-#   cp .env.example .env          # set VELOX_DOMAIN and optionally QUIC_PORT
+#   cp .env.example .env          # set VELOX_DOMAIN, CLOUDFLARE_API_TOKEN, CADDY_EMAIL
 #   docker compose up -d
 #
-# WebSocket client:
+# After setup, expose any local port with a single command — no server config needed:
+#   velox client -R 'tcp://3001:localhost:3000' quic://${VELOX_DOMAIN}:${QUIC_PORT:-8443}
+#   → https://3001.${VELOX_DOMAIN}  (wildcard TLS cert, auto-issued via Cloudflare DNS-01)
+#
+# WebSocket client (works through corporate proxies):
 #   velox client -L socks5://127.0.0.1:1080 wss://${VELOX_DOMAIN}
 # QUIC client (binary must be built with --features quic):
 #   velox client -L socks5://127.0.0.1:1080 quic://${VELOX_DOMAIN}:${QUIC_PORT:-8443}
@@ -47,20 +51,29 @@ services:
       start_period: 5s
     # No external TCP ports - Caddy is the only TCP entry point.
 
-  # ─── Caddy reverse proxy with auto-TLS ──────────────────────────────────────
+  # ─── Caddy reverse proxy with auto-TLS + Cloudflare DNS-01 wildcard ─────────
+  # Pre-built image published to GHCR by the docker-helm.yaml workflow.
+  # Includes the Cloudflare DNS plugin (xcaddy) for wildcard TLS certs so that
+  # any port-based subdomain (e.g. 3001.velox.aerol.ai) is covered automatically
+  # without ever editing the Caddyfile again.
   caddy:
-    image: caddy:2-alpine
+    image: ghcr.io/aerol-ai/caddy-cloudflare:main
     restart: unless-stopped
     ports:
       - "80:80"          # HTTP (redirected to HTTPS by Caddy)
       - "443:443"        # HTTPS / WSS
-      - "443:443/udp"    # HTTP/3 (QUIC) - optional, safe to remove
+      - "443:443/udp"    # HTTP/3 (optional)
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data         # TLS certificate store (persisted)
       - caddy_config:/config     # Caddy runtime config (persisted)
     environment:
       VELOX_DOMAIN: "${VELOX_DOMAIN:-localhost}"
+      # Required for Cloudflare DNS-01 wildcard TLS. Get a token with
+      # "Edit zone DNS" permission from https://dash.cloudflare.com/profile/api-tokens
+      CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN}"
+      # Email used for Let's Encrypt account registration
+      CADDY_EMAIL: "${CADDY_EMAIL:-admin@example.com}"
     depends_on:
       velox:
         condition: service_healthy

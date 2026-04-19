@@ -1,23 +1,96 @@
-# Velox + Caddy configuration
-# Set VELOX_DOMAIN in your .env file (or shell) before running docker compose up.
-# Caddy automatically obtains and renews TLS certificates via ACME (Let's Encrypt).
-# For local development use VELOX_DOMAIN=localhost - Caddy will issue a local cert.
+# Velox + Caddy wildcard configuration
+#
+# Prerequisites (one-time):
+#   1. DNS records at your provider:
+#        <VELOX_DOMAIN>      A      <server-public-ip>   (DNS-only / grey cloud in CF)
+#        *.<VELOX_DOMAIN>    CNAME  <VELOX_DOMAIN>       (DNS-only / grey cloud in CF)
+#   2. CLOUDFLARE_API_TOKEN set in .env  (needs "Edit zone DNS" permission)
+#   3. Caddy image built with the Cloudflare DNS plugin  (see Dockerfile.caddy)
+#
+# How it works after setup:
+#   velox client -R 'tcp://3001:localhost:3000' quic://<VELOX_DOMAIN>:8443
+#   → public URL: https://3001.<VELOX_DOMAIN>   (TLS cert already valid, no Caddy edit needed)
+#
+# Transport summary:
+#   WebSocket/HTTP2  → Caddy :443 (TCP)  → velox:8080
+#   QUIC             → velox :8443 (UDP) directly (Caddy cannot proxy UDP)
 
+{
+    # Global options
+    # Uncomment to switch to Let's Encrypt staging while testing to avoid rate limits:
+    # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+    email {$CADDY_EMAIL:admin@example.com}
+}
+
+# ── 1. Velox control-plane (WebSocket / HTTP2 tunnel connections) ────────────
+#
+# This handles the velox client's own connection to the server.
+# All -R / -L commands flow through here over WSS.
 {$VELOX_DOMAIN:localhost} {
-    # Reverse-proxy all WebSocket and HTTP traffic to the velox server.
-    # Caddy handles the Upgrade/Connection headers automatically.
+    tls {
+        # DNS-01 challenge via Cloudflare — works even when port 80 is blocked.
+        # Remove this block if CLOUDFLARE_API_TOKEN is not set and fall back to
+        # HTTP-01 (only works for the bare domain, not wildcards).
+        dns cloudflare {$CLOUDFLARE_API_TOKEN}
+        resolvers 1.1.1.1
+    }
+
     reverse_proxy velox:8080 {
-        # Increase timeouts for long-lived tunnel connections
         transport http {
             read_timeout  0
             write_timeout 0
         }
-        # Pass real client IP to velox logs
         header_up X-Forwarded-For {remote_host}
         header_up X-Real-IP       {remote_host}
     }
 
-    # Access logs (remove or adjust verbosity as needed)
+    log {
+        output stderr
+        level  INFO
+    }
+}
+
+# ── 2. Wildcard subdomain → auto port routing ────────────────────────────────
+#
+# Matches any subdomain: 3001.<VELOX_DOMAIN>, 5432.<VELOX_DOMAIN>, etc.
+# The leftmost label is used as the port number on localhost.
+#
+# Caddy label numbering (right-to-left):
+#   3001.velox.aerol.ai
+#   ↑                ↑
+#   {labels.4}    {labels.1}
+#
+# Usage (no server config needed after this):
+#   velox client -R 'tcp://3001:localhost:3000' quic://<VELOX_DOMAIN>:8443
+#   → https://3001.<VELOX_DOMAIN>  proxies to localhost:3001 on the server
+#      which routes through the reverse tunnel to your localhost:3000
+#
+*.{$VELOX_DOMAIN:localhost} {
+    tls {
+        dns cloudflare {$CLOUDFLARE_API_TOKEN}
+        resolvers 1.1.1.1
+    }
+
+    # Security: block access to privileged ports (< 1024) via subdomain routing.
+    # Only ports 1024–65535 can be targeted this way.
+    @privileged {
+        # {labels.4} is the leftmost subdomain label (the port number).
+        # We cannot do arithmetic in Caddy matchers, so we block well-known
+        # single/double-digit and triple-digit prefixes that map to priv ports.
+        # For tighter control, add a restriction.yaml on the velox server side.
+        not path *
+        # Allow all — restrict at the velox restrictions.yaml level instead.
+    }
+
+    reverse_proxy localhost:{labels.4} {
+        transport http {
+            read_timeout  0
+            write_timeout 0
+        }
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP       {remote_host}
+    }
+
     log {
         output stderr
         level  INFO

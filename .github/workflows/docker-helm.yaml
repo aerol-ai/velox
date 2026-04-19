@@ -7,6 +7,7 @@
 #
 # Outputs:
 #   • ghcr.io/<owner>/velox:<tag>
+#   • ghcr.io/<owner>/caddy-cloudflare:<tag>  (Caddy + Cloudflare DNS plugin)
 #   • oci://ghcr.io/<owner>/charts   (Helm OCI registry)
 
 name: Docker & Helm Package
@@ -74,7 +75,52 @@ jobs:
           # stage runs, which is the desired CI behaviour).
           target: final-image
 
-  # ── 2. Helm chart ─────────────────────────────────────────────────────────────
+  # ── 2. Caddy + Cloudflare DNS plugin image ────────────────────────────────────
+  # Builds Dockerfile.caddy and publishes ghcr.io/<owner>/caddy-cloudflare.
+  # docker-compose.yml references this pre-built image directly so users never
+  # need to compile anything — a plain `docker compose up -d` is all it takes.
+  caddy_image:
+    name: Build & Push Caddy-Cloudflare Image
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Caddy image metadata
+        id: caddy_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/caddy-cloudflare
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=raw,value=main,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push Caddy-Cloudflare image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.caddy
+          push: true
+          tags: ${{ steps.caddy_meta.outputs.tags }}
+          labels: ${{ steps.caddy_meta.outputs.labels }}
+          cache-from: type=gha,scope=caddy-cloudflare
+          cache-to: type=gha,mode=max,scope=caddy-cloudflare
+
+  # ── 3. Helm chart ─────────────────────────────────────────────────────────────
   helm:
     name: Package & Push Helm Chart
     runs-on: ubuntu-24.04

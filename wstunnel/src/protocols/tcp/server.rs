@@ -261,16 +261,17 @@ mod tests {
 
     #[tokio::test]
     async fn test_proxy_connection() {
-        let (network_name, host) = if cfg!(not(target_os = "macos")) {
-            ("host", "127.0.0.1".parse::<IpAddr>().unwrap())
+        let (network_name, server_bind, target_host) = if cfg!(not(target_os = "macos")) {
+            ("host", IpAddr::from([127, 0, 0, 1]), "127.0.0.1".to_string())
         } else {
-            let host = get_if_addrs::get_if_addrs()
-                .unwrap()
-                .into_iter()
-                .map(|iface| iface.addr.ip())
-                .find(|ip| ip.is_ipv4() && !ip.is_loopback())
-                .unwrap();
-            ("wstunnel_test_proxy_connection", host)
+            // On macOS, Docker Desktop runs containers in a VM: the host's LAN IP
+            // is not routable from a user-defined bridge network, so have mitmproxy
+            // reach the listener via `host.docker.internal` and bind on all interfaces.
+            (
+                "wstunnel_test_proxy_connection",
+                IpAddr::from([0, 0, 0, 0]),
+                "host.docker.internal".to_string(),
+            )
         };
 
         let mitm_proxy: ContainerAsync<MitmProxy> = MitmProxy.with_network(network_name).start().await.unwrap();
@@ -281,15 +282,15 @@ mod tests {
         };
 
         // bind to a dynamic port - avoid conflicts
-        let server = TcpListener::bind((host, 0)).await.unwrap();
+        let server = TcpListener::bind((server_bind, 0)).await.unwrap();
         let server_port = server.local_addr().unwrap().port();
 
         let mut client = connect_with_http_proxy(
             &Url::parse(&format!("http://127.0.0.1:{proxy_port}")).unwrap(),
-            &Host::Domain(host.to_string()),
+            &Host::Domain(target_host),
             server_port,
             SoMark::new(None),
-            Duration::from_secs(1),
+            Duration::from_secs(10),
             &DnsResolver::System,
         )
         .await

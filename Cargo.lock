@@ -4551,6 +4551,7 @@ dependencies = [
  "rustls-pemfile",
  "scopeguard",
  "serde",
+ "serde_json",
  "serde_regex",
  "serde_yaml",
  "serial_test",

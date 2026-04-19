@@ -268,7 +268,7 @@ mod tests {
             // is not routable from a user-defined bridge network, so have mitmproxy
             // reach the listener via `host.docker.internal` and bind on all interfaces.
             (
-                "wstunnel_test_proxy_connection",
+                "velox_test_proxy_connection",
                 IpAddr::from([0, 0, 0, 0]),
                 "host.docker.internal".to_string(),
             )

@@ -4,14 +4,14 @@ This file provides guidance to Codex (Codex.ai/code) when working with code in t
 
 ## Project
 
-`wstunnel` tunnels TCP/UDP/Unix/Stdio traffic over WebSocket, HTTP/2, or QUIC to bypass firewalls/proxies. It is a Rust rewrite of the original Haskell tool (v7.0.0+ is not wire-compatible with previous versions). Single static binary, supports forward and reverse tunnels, static and dynamic (SOCKS5 / HTTP proxy / Linux tproxy).
+`velox` tunnels TCP/UDP/Unix/Stdio traffic over WebSocket, HTTP/2, or QUIC to bypass firewalls/proxies. It is a Rust rewrite of the original Haskell tool (v7.0.0+ is not wire-compatible with previous versions). Single static binary, supports forward and reverse tunnels, static and dynamic (SOCKS5 / HTTP proxy / Linux tproxy).
 
 ## Workspace layout
 
 Cargo workspace with two members:
 
-- `wstunnel/` — the library crate (`wstunnel`). Contains all protocol, tunnel, and transport logic. Exposes `run_client`, `run_server`, `create_client`, and the `Client` / `Server` config structs. The `clap` feature (optional) derives CLI args onto these config structs.
-- `wstunnel-cli/` — the binary crate (`wstunnel`). Thin `main.rs` that parses args with clap, sets up tracing, raises the fd limit, and delegates to the library. Optional `jemalloc` feature for release builds.
+- `velox/` — the library crate (`velox`). Contains all protocol, tunnel, and transport logic. Exposes `run_client`, `run_server`, `create_client`, and the `Client` / `Server` config structs. The `clap` feature (optional) derives CLI args onto these config structs.
+- `velox-cli/` — the binary crate (`velox`). Thin `main.rs` that parses args with clap, sets up tracing, raises the fd limit, and delegates to the library. Optional `jemalloc` feature for release builds.
 
 Crypto provider is selectable at build time:
 - `aws-lc-rs` (default) — required for ECH support (`--tls-ech-enable`).
@@ -25,10 +25,10 @@ See `.github/workflows/release.yaml` for the per-target feature combination.
 Common commands (via `just` or `mise run`, both wrap cargo):
 
 ```bash
-cargo build --package wstunnel-cli           # debug build of the CLI
-cargo build --package wstunnel-cli --release # release build
+cargo build --package velox-cli           # debug build of the CLI
+cargo build --package velox-cli --release # release build
 cargo build --features=jemalloc --release    # production build (as used by Docker/release)
-cargo build --features=quic --package wstunnel-cli    # build with QUIC support
+cargo build --features=quic --package velox-cli    # build with QUIC support
 
 just test          # cargo nextest run --all-features (REQUIRES Docker — uses testcontainers)
 just fmt           # cargo fmt --all + taplo fmt
@@ -36,10 +36,10 @@ just linter_fix    # cargo clippy --fix --all-features --locked --allow-dirty
 just bump_deps     # cargo upgrade --recursive + cargo update --recursive
 ```
 
-Tests use `nextest` + `testcontainers` + `serial_test`. Integration tests in `wstunnel/src/test_integrations.rs` bind `127.0.0.1:9998/9999` and are `#[serial]` — running them in parallel will collide. To run one test:
+Tests use `nextest` + `testcontainers` + `serial_test`. Integration tests in `velox/src/test_integrations.rs` bind `127.0.0.1:9998/9999` and are `#[serial]` — running them in parallel will collide. To run one test:
 
 ```bash
-cargo nextest run --all-features -p wstunnel test_tcp_tunnel
+cargo nextest run --all-features -p velox test_tcp_tunnel
 ```
 
 `rustfmt.toml` sets `max_width = 120`; `taplo.toml` formats TOML. CI (`Dockerfile`, `release.yaml`) enforces `cargo fmt --check` and `cargo clippy -D warnings` — run `just fmt` / `just linter_fix` before committing.
@@ -52,10 +52,10 @@ The whole tool is two CLI verbs (`client` / `server`) sharing one transport laye
 
 ### Entry points
 
-- `wstunnel-cli/src/main.rs` — parses `Commands::Client(Client) | Commands::Server(Server)` and calls `run_client` / `run_server` from the library.
-- `wstunnel/src/lib.rs` — `run_client` builds TLS config + DNS resolver + `WsClientConfig`, constructs a `WsClient`, and spawns one future per `-L` / `-R` argument. `run_server` builds `WsServerConfig` + `RestrictionsRules` and calls `WsServer::serve`.
+- `velox-cli/src/main.rs` — parses `Commands::Client(Client) | Commands::Server(Server)` and calls `run_client` / `run_server` from the library.
+- `velox/src/lib.rs` — `run_client` builds TLS config + DNS resolver + `WsClientConfig`, constructs a `WsClient`, and spawns one future per `-L` / `-R` argument. `run_server` builds `WsServerConfig` + `RestrictionsRules` and calls `WsServer::serve`.
 
-### Config (`wstunnel/src/config.rs`)
+### Config (`velox/src/config.rs`)
 
 Single 900+ line file defining the `Client` and `Server` clap structs plus all the URL-style parsers (`tcp://…`, `socks5://…`, `tproxy+udp://…`, `unix://…`, `stdio://…`). Parsers live in a `parsers` submodule and do the heavy lifting of mapping CLI URLs to `LocalProtocol` variants.
 
@@ -65,18 +65,18 @@ QUIC flags are gated by `#[cfg(feature = "quic")]`:
 
 ### Core tunnel types
 
-`wstunnel/src/tunnel/mod.rs`:
+`velox/src/tunnel/mod.rs`:
 - `LocalProtocol` — the enum of all supported protocols (Tcp, Udp, Stdio, Socks5, TProxyTcp, TProxyUdp, HttpProxy, Unix, and their `Reverse*` counterparts). Travels inside a JWT from client → server to describe what tunnel to open.
 - `RemoteAddr` — `{ protocol, host, port }` describing the far end.
 
-### Client side (`wstunnel/src/tunnel/client/`)
+### Client side (`velox/src/tunnel/client/`)
 
 - `WsClient` holds a `bb8::Pool<WsConnection>` of idle transport connections (see `--connection-min-idle`). Pool max size 1000, max lifetime 30s. **For QUIC, the pool is bypassed** (forced to 0) and a single `QuicClientState` is held in `quic_state: Arc<Mutex<Option<QuicClientState>>>`.
 - `l4_transport_stream.rs` — `TransportStream` enum-dispatches `AsyncRead + AsyncWrite` over plain TCP, client TLS, and server TLS with optional pre-buffered bytes.
 - `run_tunnel(listener)` — for forward tunnels. Accept local connection → get transport (pooled ws/h2, or open a new QUIC bi-stream) → spawn two `propagate_*` futures.
 - `run_reverse_tunnel(remote, connector)` — for reverse. Exponential-backoff reconnect loop; server tells client where to connect back via a `COOKIE` (WS/H2) or `cookie` field in the QUIC response header containing a JWT.
 
-### Server side (`wstunnel/src/tunnel/server/`)
+### Server side (`velox/src/tunnel/server/`)
 
 - `WsServer::serve` binds one `TcpListener`, optionally wraps each accepted stream with `tokio_rustls::TlsAcceptor` (ALPN picks `h2` vs `http/1.1`), then dispatches to one of:
   - `handler_websocket::ws_server_upgrade` — for WS upgrade requests.
@@ -86,7 +86,7 @@ QUIC flags are gated by `#[cfg(feature = "quic")]`:
 - `handle_tunnel_request` (WS/H2) and `handle_quic_stream` (QUIC) both validate the JWT, match against `RestrictionsRules`, and call `exec_tunnel` to open the outbound connector or reverse listener.
 - `reverse_tunnel.rs` keeps a global `LazyLock<ReverseTunnelServer<_>>` per reverse-protocol so multiple clients requesting the same reverse port share one listener.
 
-### Transport (`wstunnel/src/tunnel/transport/`)
+### Transport (`velox/src/tunnel/transport/`)
 
 - `websocket.rs` / `http2.rs` — `TunnelRead`/`TunnelWrite` impls for WS and H2.
 - `quic.rs` — QUIC transport (behind `#[cfg(feature = "quic")]`):
@@ -94,8 +94,8 @@ QUIC flags are gated by `#[cfg(feature = "quic")]`:
   - `QuicDatagramTunnelRead` / `QuicDatagramTunnelWrite` — DATAGRAM-based UDP tunnel; multiplexed by `QuicDatagramHub` using a `HashMap<u32 flow_id, mpsc::Sender<Bytes>>`.
   - `QuicTunnelRead` / `QuicTunnelWrite` — enum dispatch over the two above.
   - `QuicClientState` — holds the live `quinn::Endpoint` + `quinn::Connection` + `Arc<QuicDatagramHub>`.
-  - Wire preamble: `"WSTUNNEL/1\n"` (11 bytes) + length-prefixed fields (u16 BE).
-  - ALPN: `b"wstunnel"`.
+  - Wire preamble: `"VELOX/1\n"` (11 bytes) + length-prefixed fields (u16 BE).
+  - ALPN: `b"velox"`.
 - `jwt.rs` — HMAC-HS256 JWT carried in the `Sec-Websocket-Protocol` (WS) or `Authorization` (H2) header, or in the `jwt` field of the QUIC request header. **Signature verification is disabled** (`insecure_disable_signature_validation`); auth is done via path prefix / mTLS / restrictions.
 - `io.rs` — `propagate_local_to_remote` / `propagate_remote_to_local` pump bytes between the local socket and the transport; also handles WS pings. `MAX_PACKET_LENGTH` = 64 KiB.
 - `types.rs` — `TransportScheme` (`Ws`/`Wss`/`Http`/`Https`/`Quic`) and `TransportAddr`.
@@ -105,7 +105,7 @@ QUIC flags are gated by `#[cfg(feature = "quic")]`:
 - `tunnel/listeners/` — one file per input protocol that implements the `TunnelListener` trait (a `Stream` of accepted `(io, RemoteAddr)`). Includes `tproxy.rs` (Linux only) and `unix_sock.rs` (Unix only).
 - `tunnel/connectors/` — `TunnelConnector` trait for outbound connections (TCP, UDP, SOCKS5). TCP is the only connector that supports `connect_with_http_proxy`.
 
-### Protocols (`wstunnel/src/protocols/`)
+### Protocols (`velox/src/protocols/`)
 
 Low-level networking primitives, **not** tunnel logic:
 - `tcp.rs`, `udp.rs`, `unix_sock.rs` — socket construction, SO_MARK, PROXY protocol v2 emission.
@@ -113,7 +113,7 @@ Low-level networking primitives, **not** tunnel logic:
 - `dns.rs` — Hickory resolver, supports `dns://`, `dns+https://`, `dns+tls://`, `system://`.
 - `socks5.rs`, `http_proxy.rs`, `stdio.rs` — server-side implementations of these protocols.
 
-### Restrictions (`wstunnel/src/restrictions/`)
+### Restrictions (`velox/src/restrictions/`)
 
 Server-side allowlist. Either built inline from `--restrict-to` + `--restrict-http-upgrade-path-prefix` flags, or loaded from YAML via `--restrict-config` (auto-reloaded on change by `config_reloader.rs`). Each incoming tunnel is matched against rules (`PathPrefix`, `Authorization`, `Any`) and then checked against `Tunnel` / `ReverseTunnel` allow entries (protocol, port range, host regex, CIDR, unix_path, `port_mapping` for reverse). See `restrictions.yaml` for the full schema with examples. **Restrictions apply equally to QUIC tunnels** — same `validate_tunnel` + `exec_tunnel` path.
 
@@ -124,7 +124,7 @@ Server-side allowlist. Either built inline from `--restrict-to` + `--restrict-ht
 
 ### Executor abstraction
 
-`wstunnel/src/executor.rs` — `TokioExecutor` / `TokioExecutorRef` traits with a `DefaultTokioExecutor`. Lets the library be embedded in a host that wants to supply its own spawn function.
+`velox/src/executor.rs` — `TokioExecutor` / `TokioExecutorRef` traits with a `DefaultTokioExecutor`. Lets the library be embedded in a host that wants to supply its own spawn function.
 
 ## Things that commonly trip people up
 

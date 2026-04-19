@@ -43,7 +43,7 @@ impl TransportScheme {
             Self::Http => vec![],
             Self::Https => vec![b"h2".to_vec()],
             #[cfg(feature = "quic")]
-            Self::Quic => vec![b"wstunnel".to_vec()],
+            Self::Quic => vec![b"velox".to_vec()],
         }
     }
 }

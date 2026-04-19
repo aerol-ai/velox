@@ -1,4 +1,4 @@
-/// Comprehensive unit tests for wstunnel core modules.
+/// Comprehensive unit tests for velox core modules.
 /// These tests don't require Docker, network, or external services.
 ///
 /// Test coverage areas:
@@ -1172,7 +1172,7 @@ mod tests {
 
         #[test]
         fn test_parse_reverse_tunnel_unix() {
-            let lt = parse_reverse_tunnel_arg("unix:///tmp/wstunnel.sock:host:80").unwrap();
+            let lt = parse_reverse_tunnel_arg("unix:///tmp/velox.sock:host:80").unwrap();
             assert!(matches!(lt.local_protocol, LocalProtocol::ReverseUnix { .. }));
         }
     }

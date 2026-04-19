@@ -1,10 +1,10 @@
-//! QUIC transport for wstunnel.
+//! QUIC transport for velox.
 //!
 //! Wire format on each bi-directional stream:
 //!
 //! Client → Server (first bytes after `open_bi`):
 //! ```text
-//! [preamble: b"WSTUNNEL/1\n" (11 bytes)]
+//! [preamble: b"VELOX/1\n" (8 bytes)]
 //! [u16 BE path_prefix_len][path_prefix: utf-8]
 //! [u16 BE jwt_len][jwt: utf-8]
 //! [u16 BE auth_len][authorization: utf-8]      // empty = no Authorization header
@@ -17,7 +17,7 @@
 //!
 //! Server → Client (first bytes once the request is validated):
 //! ```text
-//! [preamble: b"WSTUNNEL/1\n" (11 bytes)]
+//! [preamble: b"VELOX/1\n" (8 bytes)]
 //! [u8 status]                                  // 0 = OK, non-zero = error
 //! [u16 BE reason_len][reason: utf-8]
 //! [u16 BE cookie_len][cookie: utf-8]           // JWT cookie for dynamic reverse tunnels
@@ -51,7 +51,7 @@ use tokio_rustls::rustls::pki_types::ServerName;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-const PREAMBLE: &[u8; 11] = b"WSTUNNEL/1\n";
+const PREAMBLE: &[u8; 8] = b"VELOX/1\n";
 const MAX_PATH_PREFIX_LEN: usize = 4096;
 const MAX_JWT_LEN: usize = 16 * 1024;
 const MAX_AUTH_LEN: usize = 8 * 1024;
@@ -67,7 +67,7 @@ pub const STATUS_INTERNAL_ERROR: u8 = 3;
 
 const QUIC_DATAGRAM_CHANNEL_SIZE: usize = 64;
 const QUIC_DATAGRAM_FLOW_PREFIX_LEN: usize = 4;
-pub const QUIC_ALPN: &[u8] = b"wstunnel";
+pub const QUIC_ALPN: &[u8] = b"velox";
 
 // ============================================================================
 // Wire format
@@ -580,7 +580,7 @@ pub struct QuicClientState {
     pub(crate) zero_rtt_accepted: Arc<AtomicBool>,
 }
 
-/// Build a `quinn::TransportConfig` from the explicit wstunnel QUIC settings.
+/// Build a `quinn::TransportConfig` from the explicit velox QUIC settings.
 pub fn build_transport_config(
     keep_alive_interval: Option<Duration>,
     max_idle_timeout: Option<Duration>,

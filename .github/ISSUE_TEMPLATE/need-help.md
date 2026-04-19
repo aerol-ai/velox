@@ -10,14 +10,14 @@ labels: 'help wanted'
 
 ==> Read and try the examples first before requesting help <==
 
-https://github.com/erebe/wstunnel?#examples
+https://github.com/aerol-ai/velox?#examples
 
-If you have trouble with wireguard  https://github.com/erebe/wstunnel?#wireguard-and-wstunnel-
+If you have trouble with wireguard  https://github.com/aerol-ai/velox?#wireguard-and-velox-
 ```
-If wstunnel cannot connect to server while wireguard is on,
-be sure you have added a static route via your main gateway for the ip of wstunnel server.
+If velox cannot connect to server while wireguard is on,
+be sure you have added a static route via your main gateway for the ip of velox server.
 Else if you forward all the traffic without putting a static route,
-you will endup looping your traffic wireguard interface -> wstunnel client -> wireguard interface
+you will endup looping your traffic wireguard interface -> velox client -> wireguard interface
 If you have trouble making it works on windows, please check this issue #252
 ```
 
@@ -36,8 +36,8 @@ Describe if you are behind a proxy, if you use some kind relay, what protocol/ap
 A clear and concise description of why you can't reach your goal.
 
 
-## Describe your wstunnel setup
-Paste your logs of wstunnel, started with `--log-lvl=DEBUG`, and with the `command line used`
+## Describe your velox setup
+Paste your logs of velox, started with `--log-lvl=DEBUG`, and with the `command line used`
  - client
  - server
 

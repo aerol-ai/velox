@@ -91,7 +91,7 @@ async fn client_ws(dns_resolver: DnsResolver) -> WsClient {
         remote_addr: TransportAddr::new(TransportScheme::Ws, Host::Ipv4("127.0.0.1".parse().unwrap()), 8080, None)
             .unwrap(),
         socket_so_mark: SoMark::new(None),
-        http_upgrade_path_prefix: "wstunnel".to_string(),
+        http_upgrade_path_prefix: "velox".to_string(),
         http_upgrade_credentials: None,
         http_headers: HashMap::new(),
         http_headers_file: None,
@@ -295,7 +295,7 @@ async fn client_quic_at_port(dns_resolver: DnsResolver, target_port: u16) -> WsC
         )
         .unwrap(),
         socket_so_mark: SoMark::new(None),
-        http_upgrade_path_prefix: "wstunnel".to_string(),
+        http_upgrade_path_prefix: "velox".to_string(),
         http_upgrade_credentials: None,
         http_headers: HashMap::new(),
         http_headers_file: None,
@@ -412,7 +412,7 @@ fn build_client_mtls_material(
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     ca_params
         .distinguished_name
-        .push(DnType::CommonName, "wstunnel-quic-test-ca");
+        .push(DnType::CommonName, "velox-quic-test-ca");
     ca_params.key_usages.push(KeyUsagePurpose::DigitalSignature);
     ca_params.key_usages.push(KeyUsagePurpose::KeyCertSign);
     ca_params.key_usages.push(KeyUsagePurpose::CrlSign);
@@ -541,7 +541,7 @@ async fn test_tcp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: 
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let client_quic = client_quic(dns_resolver.clone(), 1, "wstunnel", None, None).await;
+    let client_quic = client_quic(dns_resolver.clone(), 1, "velox", None, None).await;
 
     let server = TcpTunnelListener::new(TUNNEL_LISTEN.0, (ENDPOINT_LISTEN.1.clone(), ENDPOINT_LISTEN.0.port()), false)
         .await
@@ -583,7 +583,7 @@ async fn test_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: 
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let client_quic = client_quic(dns_resolver.clone(), 1, "wstunnel", None, None).await;
+    let client_quic = client_quic(dns_resolver.clone(), 1, "velox", None, None).await;
 
     let server = UdpTunnelListener::new(TUNNEL_LISTEN.0, (ENDPOINT_LISTEN.1.clone(), ENDPOINT_LISTEN.0.port()), None)
         .await
@@ -629,7 +629,7 @@ async fn test_reverse_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_re
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let client_quic = client_quic(dns_resolver.clone(), 1, "wstunnel", None, None).await;
+    let client_quic = client_quic(dns_resolver.clone(), 1, "velox", None, None).await;
 
     let reverse_remote = RemoteAddr {
         protocol: LocalProtocol::ReverseUdp { timeout: None },
@@ -775,7 +775,7 @@ async fn test_tcp_tunnel_quic_0rtt(no_restrictions: RestrictionsRules, dns_resol
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let mut client_quic = client_quic(dns_resolver.clone(), 1, "wstunnel", None, None).await;
+    let mut client_quic = client_quic(dns_resolver.clone(), 1, "velox", None, None).await;
     let mut c_cfg = (*client_quic.config).clone();
     c_cfg.quic_0rtt = true;
     client_quic.config = Arc::new(c_cfg);
@@ -869,7 +869,7 @@ async fn test_quic_connection_migration(no_restrictions: RestrictionsRules, dns_
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let client_quic = client_quic(dns_resolver.clone(), 1, "wstunnel", None, None).await;
+    let client_quic = client_quic(dns_resolver.clone(), 1, "velox", None, None).await;
 
     let server = TcpTunnelListener::new(TUNNEL_LISTEN.0, (ENDPOINT_LISTEN.1.clone(), ENDPOINT_LISTEN.0.port()), false)
         .await
@@ -933,7 +933,7 @@ async fn test_quic_connection_migration(no_restrictions: RestrictionsRules, dns_
 /// Lossy-link test: put a UDP relay between client and server that drops 5% of packets in
 /// each direction and verify a moderate payload still round-trips intact through a QUIC
 /// tunnel. Validates that QUIC's per-packet retransmit machinery compensates for loss
-/// without wstunnel framing getting in the way.
+/// without velox framing getting in the way.
 #[cfg(feature = "quic")]
 #[rstest]
 #[timeout(Duration::from_secs(20))]

@@ -1,5 +1,5 @@
 [package]
-name = "wstunnel-cli"
+name = "velox-cli"
 version = "10.5.2"
 edition = "2024"
 
@@ -11,18 +11,18 @@ tokio = { version = "1.49.0", features = ["full"] }
 tokio-util = "0.7.18"
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "local-time"] }
-wstunnel = { path = "../wstunnel", default-features = false, features = ["clap"] }
+velox = { path = "../velox", default-features = false, features = ["clap"] }
 
 tikv-jemallocator = { version = "0.6", optional = true }
 
 [features]
 default = ["aws-lc-rs"]
 jemalloc = ["dep:tikv-jemallocator"]
-aws-lc-rs = ["wstunnel/aws-lc-rs"]
-ring = ["wstunnel/ring"]
-quic = ["wstunnel/quic"]
-aws-lc-rs-bindgen = ["wstunnel/aws-lc-rs-bindgen"]
+aws-lc-rs = ["velox/aws-lc-rs"]
+ring = ["velox/ring"]
+quic = ["velox/quic"]
+aws-lc-rs-bindgen = ["velox/aws-lc-rs-bindgen"]
 
 [[bin]]
-name = "wstunnel"
+name = "velox"
 path = "src/main.rs"

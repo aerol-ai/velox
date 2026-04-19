@@ -1,4 +1,4 @@
-# Using mTLS with wstunnel
+# Using mTLS with velox
 
 ## Generating keys and certificates
 
@@ -9,14 +9,14 @@ or [Dogtag PKI](https://www.dogtagpki.org/) for example.
 
 These steps are based on: https://jamielinux.com/docs/openssl-certificate-authority/
 
-In order to setup wstunnel to authenticate clients with certificates (mTLS) one must have a certificate authority for
+In order to setup velox to authenticate clients with certificates (mTLS) one must have a certificate authority for
 signing client certificates. In this example we will create a certificate authority using OpenSSL.
 
-Run these commands from a directory which we will use to store the CA's files. For example under `~/wstunnel/client_ca`
+Run these commands from a directory which we will use to store the CA's files. For example under `~/velox/client_ca`
 
 ```shell
-$ mkdir -p $HOME/wstunnel/ca/{certs,csr,crl,newcerts,private}
-$ cd $HOME/wstunnel/ca/
+$ mkdir -p $HOME/velox/ca/{certs,csr,crl,newcerts,private}
+$ cd $HOME/velox/ca/
 $ echo 1000 > serial
 $ touch index.txt
 ```
@@ -30,7 +30,7 @@ default_ca = CA_default
 
 [ CA_default ]
 # Directory and file locations.
-dir               = $HOME/wstunnel/ca
+dir               = $HOME/velox/ca
 certs             = \$dir/certs
 crl_dir           = \$dir/crl
 new_certs_dir     = \$dir/newcerts
@@ -90,7 +90,7 @@ emailAddress                    = Email Address
 countryName_default             = GB
 stateOrProvinceName_default     = England
 localityName_default            =
-0.organizationName_default      = wstunnel development
+0.organizationName_default      = velox development
 #organizationalUnitName_default =
 #emailAddress_default           =
 
@@ -131,7 +131,7 @@ Generate the private key of the certificate authority. Normally you would encryp
 development purposes we will leave it unencrypted.
 
 ```shell
-$ cd $HOME/wstunnel/ca/
+$ cd $HOME/velox/ca/
 $ openssl genrsa -out private/ca.key.pem 4096
 ```
 
@@ -148,90 +148,90 @@ State or Province Name [England]:
 Locality Name []:
 Organization Name [Alice Ltd]:
 Organizational Unit Name []:
-Common Name []:wstunnel Development Root CA
+Common Name []:velox Development Root CA
 Email Address []:
 ```
 
-Generate a key for the wstunnel server, generate a certificate signing request (CSR) and create a certificate with our
+Generate a key for the velox server, generate a certificate signing request (CSR) and create a certificate with our
 CA for the CSR:
 
 ```shell
-$ openssl genrsa -out private/wstunnel-server.pem 2048
+$ openssl genrsa -out private/velox-server.pem 2048
 $ openssl req -config openssl.cnf \
-      -key private/wstunnel-server.pem \
-      -new -sha256 -out csr/wstunnel-server.csr.pem
+      -key private/velox-server.pem \
+      -new -sha256 -out csr/velox-server.csr.pem
 ---8<------
 Country Name (2 letter code) [GB]:
 State or Province Name [England]:
 Locality Name []:
 Organization Name [Alice Ltd]:
 Organizational Unit Name []:
-Common Name []:wstunnel Development Server
+Common Name []:velox Development Server
 Email Address []:
 
 $ openssl ca -config openssl.cnf \
       -extensions server_cert -days 375 -notext -md sha256 \
-      -in csr/wstunnel-server.csr.pem \
-      -out certs/wstunnel-server.cert.pem
+      -in csr/velox-server.csr.pem \
+      -out certs/velox-server.cert.pem
 ---8<------
 Sign the certificate? [y/n]:y
 1 out of 1 certificate requests certified, commit? [y/n]y
 ```
 
-Next we do the same thing (generate key, create request, sign request) but then for a wstunnel client:
+Next we do the same thing (generate key, create request, sign request) but then for a velox client:
 
 ```shell
-$ openssl genrsa -out private/wstunnel-client-1.pem 2048
+$ openssl genrsa -out private/velox-client-1.pem 2048
 $ openssl req -config openssl.cnf \
-      -key private/wstunnel-client-1.pem \
-      -new -sha256 -out csr/wstunnel-client-1.csr.pem
+      -key private/velox-client-1.pem \
+      -new -sha256 -out csr/velox-client-1.csr.pem
 ---8<------
 Country Name (2 letter code) [GB]:
 State or Province Name [England]:
 Locality Name []:
 Organization Name [Alice Ltd]:
 Organizational Unit Name []:
-Common Name []:wstunnel_client_1   # must contains only url valid characters
+Common Name []:velox_client_1   # must contains only url valid characters
 Email Address []:
 
 $ openssl ca -config openssl.cnf \
       -extensions client_cert -days 375 -notext -md sha256 \
-      -in csr/wstunnel-client-1.csr.pem \
-      -out certs/wstunnel-client-1.cert.pem
+      -in csr/velox-client-1.csr.pem \
+      -out certs/velox-client-1.cert.pem
 ---8<------
 Sign the certificate? [y/n]:y
 1 out of 1 certificate requests certified, commit? [y/n]y
 ```
 
-## Using mTLS on the wstunnel server side
+## Using mTLS on the velox server side
 
 This section assumes you have generated the certificate authority, keys, certificates, etc. as outlined in the "
 Generating keys and certificates" section.
 
-Start a `wstunnel` server and make it use the server key pair certificate (`--tls-certificate` and `--tls-private-key`)
+Start a `velox` server and make it use the server key pair certificate (`--tls-certificate` and `--tls-private-key`)
 and configure it to authenticate clients via mTLS (`--tls-client-ca-certs`):
 
 ```shell
-$ wstunnel server \
-   --tls-certificate ./certs/wstunnel-server.cert.pem \
-   --tls-private-key ./private/wstunnel-server.pem \
+$ velox server \
+   --tls-certificate ./certs/velox-server.cert.pem \
+   --tls-private-key ./private/velox-server.pem \
    --tls-client-ca-certs ./certs/ca.cert.pem \
    wss://0.0.0.0:8443
 ```
 
 ### Testing
 
-You can use `openssl` to test connecting with the client certificate to the wstunnel server:
+You can use `openssl` to test connecting with the client certificate to the velox server:
 
 ```shell
 $ openssl s_client -connect 127.0.0.1:8443 \
-   -key ./private/wstunnel-client-1.pem \
-   -cert ./certs/wstunnel-client-1.cert.pem \
+   -key ./private/velox-client-1.pem \
+   -cert ./certs/velox-client-1.cert.pem \
    -cert_chain ./certs/ca.cert.pem \
    -state -debug
 ---8<-----
 Acceptable client certificate CA names
-C = GB, ST = England, O = Alice Ltd, CN = wstunnel Development Root CA
+C = GB, ST = England, O = Alice Ltd, CN = velox Development Root CA
 ---8<-----
 ```
 
@@ -261,16 +261,16 @@ tells `curl` which CA certificate to use to verify the certificate of the **serv
 $ curl -vvv --cacert ./certs/ca.cert.pem https://127.0.0.1:8443
 ```
 
-## Using mTLS on the wstunnel client side
+## Using mTLS on the velox client side
 
 This section assumes you have generated the certificate authority, keys, certificates, etc. as outlined in the "
-Generating keys and certificates" section. It also assumes you have a running wstunnel server with mTLS configured. For
-example as setup in the `Using mTLS on the wstunnel server side` section.
+Generating keys and certificates" section. It also assumes you have a running velox server with mTLS configured. For
+example as setup in the `Using mTLS on the velox server side` section.
 
 ```shell
-$ wstunnel client \
-   --tls-certificate ./certs/wstunnel-client-1.cert.pem \
-   --tls-private-key ./private/wstunnel-client-1.pem \
+$ velox client \
+   --tls-certificate ./certs/velox-client-1.cert.pem \
+   --tls-private-key ./private/velox-client-1.pem \
    -L tcp://1212:localhost:1313 \
    wss://127.0.0.1:8443
    

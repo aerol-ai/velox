@@ -103,6 +103,14 @@ pub fn load_private_key_from_file(path: &Path) -> anyhow::Result<PrivateKeyDer<'
     Ok(private_key)
 }
 
+fn ensure_default_crypto_provider() {
+    #[cfg(feature = "aws-lc-rs")]
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    #[cfg(all(not(feature = "aws-lc-rs"), feature = "ring"))]
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 pub fn tls_connector(
     tls_verify_certificate: bool,
     alpn_protocols: Vec<Vec<u8>>,
@@ -111,6 +119,8 @@ pub fn tls_connector(
     tls_client_certificate: Option<Vec<CertificateDer<'static>>>,
     tls_client_key: Option<PrivateKeyDer<'static>>,
 ) -> anyhow::Result<TlsConnector> {
+    ensure_default_crypto_provider();
+
     let mut root_store = RootCertStore::empty();
 
     // Load system certificates and add them to the root store
@@ -155,7 +165,12 @@ pub fn tls_connector(
     Ok(tls_connector)
 }
 
-pub fn tls_acceptor(tls_cfg: &TlsServerConfig, alpn_protocols: Option<Vec<Vec<u8>>>) -> anyhow::Result<TlsAcceptor> {
+pub fn build_server_config(
+    tls_cfg: &TlsServerConfig,
+    alpn_protocols: Option<Vec<Vec<u8>>>,
+) -> anyhow::Result<rustls::ServerConfig> {
+    ensure_default_crypto_provider();
+
     let client_cert_verifier = if let Some(tls_client_ca_certificates) = &tls_cfg.tls_client_ca_certificates {
         let mut root_store = RootCertStore::empty();
         for tls_client_ca_certificate in tls_client_ca_certificates.lock().iter() {
@@ -180,7 +195,11 @@ pub fn tls_acceptor(tls_cfg: &TlsServerConfig, alpn_protocols: Option<Vec<Vec<u8
     if let Some(alpn_protocols) = alpn_protocols {
         config.alpn_protocols = alpn_protocols;
     }
-    Ok(TlsAcceptor::from(Arc::new(config)))
+    Ok(config)
+}
+
+pub fn tls_acceptor(tls_cfg: &TlsServerConfig, alpn_protocols: Option<Vec<Vec<u8>>>) -> anyhow::Result<TlsAcceptor> {
+    Ok(TlsAcceptor::from(Arc::new(build_server_config(tls_cfg, alpn_protocols)?)))
 }
 
 pub async fn connect(client_cfg: &WsClientConfig, tcp_stream: TcpStream) -> anyhow::Result<TlsStream<TcpStream>> {

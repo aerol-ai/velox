@@ -354,9 +354,7 @@ fn sni_for(client: &WsClient<impl crate::TokioExecutorRef>, fallback: &str) -> S
     }
 }
 
-async fn establish_new_connection(
-    client: &WsClient<impl crate::TokioExecutorRef>,
-) -> anyhow::Result<QuicClientState> {
+async fn establish_new_connection(client: &WsClient<impl crate::TokioExecutorRef>) -> anyhow::Result<QuicClientState> {
     let server_addr = resolve_server(client).await?;
     let bind = client_bind_for(server_addr);
     let quinn_client_cfg = build_quinn_client_config(client)?;

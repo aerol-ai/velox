@@ -1,6 +1,7 @@
 mod server;
 mod utils;
 
+pub use server::build_server_config;
 pub use server::connect;
 pub use server::load_certificates_from_pem;
 pub use server::load_private_key_from_file;

@@ -1,19 +1,21 @@
 use crate::executor::TokioExecutorRef;
+use crate::protocols::tls;
 use crate::restrictions::types::RestrictionsRules;
 use crate::tunnel::RemoteAddr;
 use crate::tunnel::server::WsServer;
 use crate::tunnel::server::utils::validate_tunnel;
 use crate::tunnel::transport;
-use crate::tunnel::transport::{jwt_token_to_tunnel, tunnel_to_jwt_token};
 use crate::tunnel::transport::quic::{
     QUIC_ALPN, QuicRequestHeader, QuicResponseHeader, QuicTunnelRead, QuicTunnelWrite, STATUS_BAD_REQUEST,
     STATUS_FORBIDDEN, STATUS_INTERNAL_ERROR,
 };
-use anyhow::{Context, anyhow};
+use crate::tunnel::transport::{jwt_token_to_tunnel, tunnel_to_jwt_token};
+use anyhow::anyhow;
 use arc_swap::ArcSwap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::oneshot;
+use tokio_rustls::rustls::pki_types::CertificateDer;
 use tracing::{Instrument, Level, Span, error, info, span, warn};
 use uuid::Uuid;
 
@@ -32,14 +34,7 @@ fn mk_quic_span() -> Span {
 pub(super) fn build_quic_server_config(
     tls_config: &crate::tunnel::server::TlsServerConfig,
 ) -> anyhow::Result<quinn::ServerConfig> {
-    let cert = tls_config.tls_certificate.lock().clone();
-    let key = tls_config.tls_key.lock().clone_key();
-
-    let mut server_crypto = tokio_rustls::rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(cert, key)
-        .with_context(|| "Invalid TLS certificate or private key for QUIC")?;
-    server_crypto.alpn_protocols = vec![QUIC_ALPN.to_vec()];
+    let server_crypto = tls::build_server_config(tls_config, Some(vec![QUIC_ALPN.to_vec()]))?;
 
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(
         quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)
@@ -57,6 +52,13 @@ async fn send_err(send: &mut quinn::SendStream, status: u8, reason: impl Into<St
     let _ = send.finish();
 }
 
+fn extract_restrict_path_prefix(connection: &quinn::Connection) -> Option<String> {
+    let identity = connection.peer_identity()?;
+    let certificates = identity.downcast::<Vec<CertificateDer<'static>>>().ok()?;
+    let leaf_certificate = tls::find_leaf_certificate(certificates.as_slice())?;
+    tls::cn_from_certificate(&leaf_certificate)
+}
+
 /// Handle a single QUIC bi-directional stream:
 ///   1. Parse the request header (path prefix + JWT + auth + custom headers).
 ///   2. Validate against restrictions.
@@ -66,6 +68,7 @@ async fn send_err(send: &mut quinn::SendStream, status: u8, reason: impl Into<St
 async fn handle_quic_stream(
     server: WsServer<impl TokioExecutorRef>,
     restrictions: Arc<RestrictionsRules>,
+    restrict_path_prefix: Option<String>,
     client_addr: SocketAddr,
     mut send: quinn::SendStream,
     mut recv: quinn::RecvStream,
@@ -78,6 +81,17 @@ async fn handle_quic_stream(
             return;
         }
     };
+
+    if let Some(restrict_path) = restrict_path_prefix.as_deref()
+        && header.path_prefix != restrict_path
+    {
+        warn!(
+            "Client requested upgrade path '{}' does not match upgrade path restriction '{}' (mTLS, etc.)",
+            header.path_prefix, restrict_path
+        );
+        send_err(&mut send, STATUS_BAD_REQUEST, "bad upgrade path").await;
+        return;
+    }
 
     let jwt = match jwt_token_to_tunnel(&header.jwt) {
         Ok(j) => j,
@@ -203,6 +217,7 @@ pub(super) async fn quic_server_serve<E: TokioExecutorRef>(
 
             let client_addr = connection.remote_address();
             info!("QUIC connection established from {client_addr}");
+            let restrict_path_prefix = extract_restrict_path_prefix(&connection);
 
             // Accept multiplexed bi-directional streams from this connection.
             loop {
@@ -223,15 +238,16 @@ pub(super) async fn quic_server_serve<E: TokioExecutorRef>(
                 let (send, recv) = stream;
                 let server = server.clone();
                 let restrictions = restrictions.load().clone();
+                let restrict_path_prefix = restrict_path_prefix.clone();
 
                 let request_id = Uuid::now_v7();
                 let span = mk_quic_span();
                 span.record("id", request_id.to_string());
 
-                server
-                    .executor
-                    .clone()
-                    .spawn(handle_quic_stream(server.clone(), restrictions, client_addr, send, recv).instrument(span));
+                server.executor.clone().spawn(
+                    handle_quic_stream(server.clone(), restrictions, restrict_path_prefix, client_addr, send, recv)
+                        .instrument(span),
+                );
             }
         });
     }

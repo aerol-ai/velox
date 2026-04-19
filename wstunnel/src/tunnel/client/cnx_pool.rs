@@ -2,6 +2,8 @@ use crate::protocols;
 use crate::protocols::tls;
 use crate::tunnel::client::WsClientConfig;
 use crate::tunnel::client::l4_transport_stream::TransportStream;
+#[cfg(feature = "quic")]
+use crate::tunnel::transport::TransportScheme;
 use bb8::ManageConnection;
 use bytes::Bytes;
 use std::ops::Deref;
@@ -31,6 +33,11 @@ impl ManageConnection for WsConnection {
 
     #[instrument(level = "trace", name = "cnx_server", skip_all)]
     async fn connect(&self) -> Result<Self::Connection, Self::Error> {
+        #[cfg(feature = "quic")]
+        if matches!(self.remote_addr.scheme(), TransportScheme::Quic) {
+            return Err(anyhow::anyhow!("QUIC transport does not use the TCP connection pool"));
+        }
+
         let timeout = self.timeout_connect;
 
         let tcp_stream = if let Some(http_proxy) = &self.http_proxy {

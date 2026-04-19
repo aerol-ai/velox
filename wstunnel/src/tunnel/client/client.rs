@@ -33,8 +33,7 @@ pub struct WsClient<E: TokioExecutorRef = DefaultTokioExecutor> {
     /// same QUIC connection as independent streams. Lazily created on first use; cleared and
     /// re-established when the connection dies.
     #[cfg(feature = "quic")]
-    pub(crate) quic_state:
-        Arc<tokio::sync::Mutex<Option<crate::tunnel::transport::quic::QuicClientState>>>,
+    pub(crate) quic_state: Arc<tokio::sync::Mutex<Option<crate::tunnel::transport::quic::QuicClientState>>>,
 }
 
 impl<E: TokioExecutorRef> WsClient<E> {
@@ -47,6 +46,11 @@ impl<E: TokioExecutorRef> WsClient<E> {
     ) -> anyhow::Result<Self> {
         let config = Arc::new(config);
         let cnx = WsConnection::new(config.clone());
+        #[cfg(feature = "quic")]
+        let connection_min_idle = match config.remote_addr.scheme() {
+            TransportScheme::Quic => 0,
+            _ => connection_min_idle,
+        };
         let tls_reloader = TlsReloader::new_for_client(config.clone()).with_context(|| "Cannot create tls reloader")?;
         let cnx_pool = bb8::Pool::builder()
             .max_size(1000)
@@ -91,11 +95,9 @@ impl<E: TokioExecutorRef> WsClient<E> {
                     .map(|(r, w, response)| (TunnelReader::Http2(r), TunnelWriter::Http2(w), response))?
             }
             #[cfg(feature = "quic")]
-            TransportScheme::Quic => {
-                tunnel::transport::quic::connect(request_id, self, remote_cfg)
-                    .await
-                    .map(|(r, w, response)| (TunnelReader::Quic(r), TunnelWriter::Quic(w), response))?
-            }
+            TransportScheme::Quic => tunnel::transport::quic::connect(request_id, self, remote_cfg)
+                .await
+                .map(|(r, w, response)| (TunnelReader::Quic(r), TunnelWriter::Quic(w), response))?,
         };
 
         debug!("Server response: {response:?}");

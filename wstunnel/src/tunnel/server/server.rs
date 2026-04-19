@@ -318,10 +318,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
     }
 
     #[cfg(feature = "quic")]
-    fn create_quic_endpoint(
-        config: &WsServerConfig,
-        quic_bind: SocketAddr,
-    ) -> anyhow::Result<quinn::Endpoint> {
+    fn create_quic_endpoint(config: &WsServerConfig, quic_bind: SocketAddr) -> anyhow::Result<quinn::Endpoint> {
         use crate::tunnel::server::handler_quic::build_quic_server_config;
         let tls_config = config
             .tls

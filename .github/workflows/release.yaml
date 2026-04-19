@@ -82,7 +82,7 @@ jobs:
 
 
           # Windows
-          - name: Windows x86_64
+          # - name: Windows x86_64
           #   os: windows-latest
           #   target: x86_64-pc-windows-msvc
           #   build-args: "--profile release-with-symbols"

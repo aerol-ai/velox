@@ -8,6 +8,11 @@ pub trait TokioExecutorRef: Clone + Send + Sync + 'static {
     where
         F: Future + Send + 'static,
         F::Output: Send + 'static;
+
+    fn spawn_tracked<F>(&self, f: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static;
 }
 
 pub trait TokioExecutor: TokioExecutorRef {
@@ -21,10 +26,19 @@ pub trait TokioExecutor: TokioExecutorRef {
 #[derive(Clone)]
 pub struct DefaultTokioExecutor {
     handle: Handle,
+    tracker: tokio_util::task::TaskTracker,
 }
 impl DefaultTokioExecutor {
     pub fn new(handle: Handle) -> Self {
-        Self { handle }
+        Self {
+            handle,
+            tracker: tokio_util::task::TaskTracker::new(),
+        }
+    }
+
+    pub async fn wait(&self) {
+        self.tracker.close();
+        self.tracker.wait().await;
     }
 }
 
@@ -40,7 +54,16 @@ impl TokioExecutorRef for DefaultTokioExecutor {
         F: Future + Send + 'static,
         F::Output: Send + 'static,
     {
-        self.handle.spawn(f).abort_handle()
+        let handle = self.tracker.spawn_on(f, &self.handle);
+        handle.abort_handle()
+    }
+
+    fn spawn_tracked<F>(&self, f: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        self.handle.spawn(self.tracker.track_future(f))
     }
 }
 
@@ -93,6 +116,14 @@ impl TokioExecutorRef for JoinSetTokioExecutor {
             f.await;
         })
     }
+
+    fn spawn_tracked<F>(&self, f: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        tokio::spawn(f)
+    }
 }
 
 impl TokioExecutor for JoinSetTokioExecutor {
@@ -133,5 +164,13 @@ impl TokioExecutorRef for JoinSetTokioExecutorRef {
                 })
             })
             .unwrap_or_else(|| self.default_abort_handle.clone())
+    }
+
+    fn spawn_tracked<F>(&self, f: F) -> tokio::task::JoinHandle<F::Output>
+    where
+        F: Future + Send + 'static,
+        F::Output: Send + 'static,
+    {
+        tokio::spawn(f)
     }
 }

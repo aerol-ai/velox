@@ -8,6 +8,7 @@ anyhow = "1.0.100"
 clap = { version = "4.5.56", features = ["derive", "env"] }
 fdlimit = "0.3.0"
 tokio = { version = "1.49.0", features = ["full"] }
+tokio-util = "0.7.18"
 tracing = { version = "0.1.44", features = ["log"] }
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt", "local-time"] }
 wstunnel = { path = "../wstunnel", default-features = false, features = ["clap"] }
@@ -19,6 +20,7 @@ default = ["aws-lc-rs"]
 jemalloc = ["dep:tikv-jemallocator"]
 aws-lc-rs = ["wstunnel/aws-lc-rs"]
 ring = ["wstunnel/ring"]
+quic = ["wstunnel/quic"]
 aws-lc-rs-bindgen = ["wstunnel/aws-lc-rs-bindgen"]
 
 [[bin]]

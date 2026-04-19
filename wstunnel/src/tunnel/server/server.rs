@@ -64,6 +64,20 @@ pub struct WsServerConfig {
     pub restriction_config: Option<PathBuf>,
     pub http_proxy: Option<Url>,
     pub remote_server_idle_timeout: Duration,
+    #[cfg(feature = "quic")]
+    pub quic_bind: Option<SocketAddr>,
+    #[cfg(feature = "quic")]
+    pub quic_0rtt: bool,
+    #[cfg(feature = "quic")]
+    pub quic_keep_alive: Option<Duration>,
+    #[cfg(feature = "quic")]
+    pub quic_max_idle_timeout: Option<Duration>,
+    #[cfg(feature = "quic")]
+    pub quic_max_streams: u32,
+    #[cfg(feature = "quic")]
+    pub quic_datagram_buffer_size: usize,
+    #[cfg(feature = "quic")]
+    pub quic_disable_migration: bool,
 }
 
 #[derive(Clone)]
@@ -86,6 +100,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         restrict_path_prefix: Option<String>,
         mut client_addr: SocketAddr,
         req: &Request<Incoming>,
+        shutdown: tokio_util::sync::CancellationToken,
     ) -> Result<
         (
             RemoteAddr,
@@ -137,7 +152,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         let req_protocol = remote.protocol.clone();
         let inject_cookie = req_protocol.is_dynamic_reverse_tunnel();
         let tunnel = self
-            .exec_tunnel(restriction, remote, client_addr)
+            .exec_tunnel(restriction, remote, client_addr, shutdown)
             .await
             .map_err(|err| {
                 warn!("Rejecting connection with bad upgrade request: {err} {}", req.uri());
@@ -149,11 +164,12 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         Ok((remote_addr, local_rx, local_tx, inject_cookie))
     }
 
-    async fn exec_tunnel(
+    pub(super) async fn exec_tunnel(
         &self,
         restriction: &RestrictionConfig,
         remote: RemoteAddr,
         client_address: SocketAddr,
+        shutdown: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<(RemoteAddr, Pin<Box<dyn AsyncRead + Send>>, Pin<Box<dyn AsyncWrite + Send>>)> {
         match remote.protocol {
             LocalProtocol::Udp { timeout, .. } => {
@@ -210,6 +226,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                         bind,
                         self.config.remote_server_idle_timeout,
                         listening_server,
+                        shutdown.clone(),
                     )
                     .await?;
 
@@ -229,6 +246,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                         bind,
                         self.config.remote_server_idle_timeout,
                         listening_server,
+                        shutdown.clone(),
                     )
                     .await?;
                 Ok((remote, Box::pin(local_rx), Box::pin(local_tx)))
@@ -247,6 +265,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                         bind,
                         self.config.remote_server_idle_timeout,
                         listening_server,
+                        shutdown.clone(),
                     )
                     .await?;
 
@@ -266,6 +285,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                         bind,
                         self.config.remote_server_idle_timeout,
                         listening_server,
+                        shutdown.clone(),
                     )
                     .await?;
 
@@ -293,6 +313,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                         bind,
                         self.config.remote_server_idle_timeout,
                         listening_server,
+                        shutdown.clone(),
                     )
                     .await?;
 
@@ -315,14 +336,25 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         }
     }
 
-    pub async fn serve(self, restrictions: RestrictionsRules) -> anyhow::Result<()> {
+    #[cfg(feature = "quic")]
+    fn create_quic_endpoint(config: &WsServerConfig, quic_bind: SocketAddr) -> anyhow::Result<quinn::Endpoint> {
+        use crate::tunnel::server::handler_quic::build_quic_server_config;
+        let server_config = build_quic_server_config(config)?;
+        let endpoint = quinn::Endpoint::server(server_config, quic_bind)
+            .with_context(|| format!("Failed to bind QUIC endpoint on {quic_bind}"))?;
+        info!("QUIC endpoint bound on {quic_bind}");
+        Ok(endpoint)
+    }
+
+    pub async fn serve(self, restrictions: RestrictionsRules, shutdown: tokio_util::sync::CancellationToken) -> anyhow::Result<()> {
         info!("Starting wstunnel server listening on {}", self.config.bind);
 
         // setup upgrade request handler
         let mk_websocket_upgrade_fn = |server: WsServer<_>,
                                        restrictions: Arc<ArcSwap<RestrictionsRules>>,
                                        restrict_path: Option<String>,
-                                       client_addr: SocketAddr| {
+                                       client_addr: SocketAddr,
+                                       shutdown: tokio_util::sync::CancellationToken| {
             move |req: Request<Incoming>| {
                 ws_server_upgrade(
                     server.clone(),
@@ -330,6 +362,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                     restrict_path.clone(),
                     client_addr,
                     req,
+                    shutdown.clone(),
                 )
                 .map::<anyhow::Result<_>, _>(Ok)
                 .instrument(mk_span())
@@ -339,7 +372,8 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         let mk_http_upgrade_fn = |server: WsServer<_>,
                                   restrictions: Arc<ArcSwap<RestrictionsRules>>,
                                   restrict_path: Option<String>,
-                                  client_addr: SocketAddr| {
+                                  client_addr: SocketAddr,
+                                  shutdown: tokio_util::sync::CancellationToken| {
             move |req: Request<Incoming>| {
                 http_server_upgrade(
                     server.clone(),
@@ -347,6 +381,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                     restrict_path.clone(),
                     client_addr,
                     req,
+                    shutdown.clone(),
                 )
                 .map::<anyhow::Result<_>, _>(Ok)
                 .instrument(mk_span())
@@ -356,14 +391,16 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         let mk_auto_upgrade_fn = |server: WsServer<_>,
                                   restrictions: Arc<ArcSwap<RestrictionsRules>>,
                                   restrict_path: Option<String>,
-                                  client_addr: SocketAddr| {
+                                  client_addr: SocketAddr,
+                                  shutdown: tokio_util::sync::CancellationToken| {
             move |req: Request<Incoming>| {
                 let server = server.clone();
                 let restrictions = restrictions.clone();
                 let restrict_path = restrict_path.clone();
+                let shutdown = shutdown.clone();
                 async move {
                     if fastwebsockets::upgrade::is_upgrade_request(&req) {
-                        ws_server_upgrade(server.clone(), restrictions.load().clone(), restrict_path, client_addr, req)
+                        ws_server_upgrade(server.clone(), restrictions.load().clone(), restrict_path, client_addr, req, shutdown)
                             .map::<anyhow::Result<_>, _>(Ok)
                             .await
                     } else if req.version() == Version::HTTP_2 {
@@ -373,6 +410,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                             restrict_path.clone(),
                             client_addr,
                             req,
+                            shutdown,
                         )
                         .map::<anyhow::Result<_>, _>(Ok)
                         .await
@@ -388,14 +426,16 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
             }
         };
 
-        // Init TLS if needed
+        // Init TLS if needed. The reloader is built once and shared (as Arc) between the TCP
+        // accept loop and the QUIC accept loop so both consumers see every cert-change event.
+        let tls_reloader = Arc::new(TlsReloader::new_for_server(self.config.clone())?);
         let mut tls_context = if let Some(tls_config) = &self.config.tls {
             let tls_context = TlsContext {
                 tls_acceptor: Arc::new(tls::tls_acceptor(
                     tls_config,
                     Some(vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
                 )?),
-                tls_reloader: TlsReloader::new_for_server(self.config.clone())?,
+                tls_reloader: tls_reloader.clone(),
                 tls_config,
             };
             Some(tls_context)
@@ -409,8 +449,37 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
             .await
             .with_context(|| format!("Failed to bind to socket on {}", self.config.bind))?;
 
+        #[cfg(feature = "quic")]
+        let mut _quic_handle = None;
+        // Spawn QUIC listener if configured
+        #[cfg(feature = "quic")]
+        {
+            if let Some(quic_bind) = self.config.quic_bind {
+                use crate::tunnel::server::handler_quic;
+                let quic_endpoint = Self::create_quic_endpoint(&self.config, quic_bind)?;
+                let quic_server = self.clone();
+                let quic_restrictions = restrictions.restrictions_rules().clone();
+                let quic_reloader = tls_reloader.clone();
+                _quic_handle = Some(self.executor.spawn_tracked(handler_quic::quic_server_serve(
+                    quic_server,
+                    quic_endpoint,
+                    quic_reloader,
+                    quic_restrictions,
+                    shutdown.clone(),
+                )));
+            }
+        }
+
         loop {
-            let (stream, peer_addr) = match listener.accept().await {
+            let accept_res = tokio::select! {
+                res = listener.accept() => res,
+                _ = shutdown.cancelled() => {
+                    info!("Server shutdown requested, stopping TCP accept loop");
+                    break;
+                }
+            };
+
+            let (stream, peer_addr) = match accept_res {
                 Ok(ret) => ret,
                 Err(err) => {
                     warn!("Error while accepting connection {:?}", err);
@@ -426,6 +495,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
 
             let server = self.clone();
             let restrictions = restrictions.restrictions_rules().clone();
+            let shutdown_for_conn = shutdown.clone();
 
             // Check if we need to enable TLS or not
             match tls_context.as_mut() {
@@ -458,7 +528,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                                 }
 
                                 let http_upgrade_fn =
-                                    mk_http_upgrade_fn(server, restrictions, restrict_path, peer_addr);
+                                    mk_http_upgrade_fn(server, restrictions, restrict_path, peer_addr, shutdown_for_conn.clone());
                                 let con_fut = conn_builder.serve_connection(tls_stream, service_fn(http_upgrade_fn));
                                 if let Err(e) = con_fut.await {
                                     error!("Error while upgrading cnx to http: {:?}", e);
@@ -467,7 +537,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                             // websocket
                             _ => {
                                 let websocket_upgrade_fn =
-                                    mk_websocket_upgrade_fn(server, restrictions, restrict_path, peer_addr);
+                                    mk_websocket_upgrade_fn(server, restrictions, restrict_path, peer_addr, shutdown_for_conn.clone());
                                 let conn_fut = http1::Builder::new()
                                     .timer(TokioTimer::new())
                                     // https://github.com/erebe/wstunnel/issues/358
@@ -495,7 +565,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                             conn_fut.http2().keep_alive_interval(ping);
                         }
 
-                        let websocket_upgrade_fn = mk_auto_upgrade_fn(server, restrictions, None, peer_addr);
+                        let websocket_upgrade_fn = mk_auto_upgrade_fn(server, restrictions, None, peer_addr, shutdown_for_conn);
                         let upgradable =
                             conn_fut.serve_connection_with_upgrades(stream, service_fn(websocket_upgrade_fn));
 
@@ -509,6 +579,15 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                 }
             }
         }
+
+        #[cfg(feature = "quic")]
+        if let Some(handle) = _quic_handle
+            && let Err(e) = handle.await
+        {
+            error!("QUIC server task error: {:?}", e);
+        }
+
+        Ok(())
     }
 }
 
@@ -524,8 +603,8 @@ fn mk_span() -> Span {
 
 impl Debug for WsServerConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WsServerConfig")
-            .field("socket_so_mark", &self.socket_so_mark)
+        let mut d = f.debug_struct("WsServerConfig");
+        d.field("socket_so_mark", &self.socket_so_mark)
             .field("bind", &self.bind)
             .field("websocket_ping_frequency", &self.websocket_ping_frequency)
             .field("timeout_connect", &self.timeout_connect)
@@ -540,14 +619,22 @@ impl Debug for WsServerConfig {
                     .as_ref()
                     .map(|x| x.tls_client_ca_certificates.is_some())
                     .unwrap_or(false),
-            )
-            .finish()
+            );
+        #[cfg(feature = "quic")]
+        d.field("quic_bind", &self.quic_bind)
+            .field("quic_0rtt", &self.quic_0rtt)
+            .field("quic_keep_alive", &self.quic_keep_alive)
+            .field("quic_max_idle_timeout", &self.quic_max_idle_timeout)
+            .field("quic_max_streams", &self.quic_max_streams)
+            .field("quic_datagram_buffer_size", &self.quic_datagram_buffer_size)
+            .field("quic_disable_migration", &self.quic_disable_migration);
+        d.finish()
     }
 }
 
 struct TlsContext<'a> {
     tls_acceptor: Arc<TlsAcceptor>,
-    tls_reloader: TlsReloader,
+    tls_reloader: Arc<TlsReloader>,
     tls_config: &'a TlsServerConfig,
 }
 impl TlsContext<'_> {

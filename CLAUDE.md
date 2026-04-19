@@ -138,3 +138,9 @@ Server-side allowlist. Either built inline from `--restrict-to` + `--restrict-ht
 - QUIC requires TLS; there is no cleartext QUIC. The server must have a cert (`--tls-certificate` / embedded default) and the QUIC bind port is separate from the TCP port (`--quic-bind`).
 - For QUIC, `--connection-min-idle` is silently forced to 0 because the connection pool is not used; reuse is inherent in the single-connection model.
 - QUIC DATAGRAM frames are used for UDP tunnels automatically when `transport_mode == Datagram`. The `flow_id` in the stream header registers a channel in `QuicDatagramHub`; subsequent UDP packets travel outside the stream.
+
+## gstack
+
+Use the `/browse` skill from gstack for all web browsing. Never use `mcp__claude-in-chrome__*` tools.
+
+Available gstack skills: `/office-hours`, `/plan-ceo-review`, `/plan-eng-review`, `/plan-design-review`, `/design-consultation`, `/design-shotgun`, `/design-html`, `/review`, `/ship`, `/land-and-deploy`, `/canary`, `/benchmark`, `/browse`, `/connect-chrome`, `/qa`, `/qa-only`, `/design-review`, `/setup-browser-cookies`, `/setup-deploy`, `/retro`, `/investigate`, `/document-release`, `/codex`, `/cso`, `/autoplan`, `/plan-devex-review`, `/devex-review`, `/careful`, `/freeze`, `/guard`, `/unfreeze`, `/gstack-upgrade`, `/learn`

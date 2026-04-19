@@ -616,3 +616,110 @@ async fn test_quic_mtls_rejects_wrong_path_prefix(no_restrictions: RestrictionsR
 //    client.read_buf(&mut buf).await.unwrap();
 //    assert_eq!(&buf[..6], b"world!");
 //}
+
+#[cfg(feature = "quic")]
+#[rstest]
+#[timeout(Duration::from_secs(10))]
+#[tokio::test]
+#[serial]
+async fn test_tcp_tunnel_quic_0rtt(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
+    let mut server_config = WsServerConfig {
+        socket_so_mark: SoMark::new(None),
+        bind: QUIC_SERVER_TCP_BIND,
+        websocket_ping_frequency: Some(Duration::from_secs(10)),
+        timeout_connect: Duration::from_secs(10),
+        websocket_mask_frame: false,
+        tls: Some(quic_server_tls(None)),
+        dns_resolver: dns_resolver.clone(),
+        restriction_config: None,
+        http_proxy: None,
+        remote_server_idle_timeout: Duration::from_secs(30),
+        quic_bind: Some(QUIC_SERVER_UDP_BIND),
+        quic_0rtt: true,
+        quic_keep_alive: Some(Duration::from_secs(15)),
+        quic_max_idle_timeout: Some(Duration::from_secs(60)),
+        quic_max_streams: 1024,
+        quic_datagram_buffer_size: 1024 * 1024,
+        quic_disable_migration: false,
+    };
+    let srv_conf = WsServer::new(server_config, DefaultTokioExecutor::default());
+    let server_h = tokio::spawn(srv_conf.serve(no_restrictions));
+    defer! { server_h.abort(); };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let mut client_quic = client_quic(dns_resolver.clone(), 1, "wstunnel", None, None).await;
+    let mut c_cfg = (*client_quic.config).clone();
+    c_cfg.quic_0rtt = true;
+    client_quic.config = Arc::new(c_cfg);
+
+    let server_1 = TcpTunnelListener::new(TUNNEL_LISTEN.0, (ENDPOINT_LISTEN.1.clone(), ENDPOINT_LISTEN.0.port()), false)
+        .await
+        .unwrap();
+    let client_quic_1 = client_quic.clone();
+    tokio::spawn(async move {
+        client_quic_1.run_tunnel(server_1).await.unwrap();
+    });
+
+    let mut tcp_listener = protocols::tcp::run_server(ENDPOINT_LISTEN.0, false).await.unwrap();
+    let mut client_sock_1 = protocols::tcp::connect(
+        &TUNNEL_LISTEN.1,
+        TUNNEL_LISTEN.0.port(),
+        SoMark::new(None),
+        Duration::from_secs(10),
+        &dns_resolver,
+    )
+    .await
+    .unwrap();
+
+    client_sock_1.write_all(b"Hello").await.unwrap();
+    let mut dd_1 = tcp_listener.next().await.unwrap().unwrap();
+    let mut buf = BytesMut::new();
+    dd_1.read_buf(&mut buf).await.unwrap();
+    assert_eq!(&buf[..5], b"Hello");
+
+    // give a little time for ticket to arrive
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // drop connection state to form a new connection next
+    client_quic.quic_state.lock().await.take();
+
+    let server_2 = TcpTunnelListener::new(
+        SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 9997)),
+        (ENDPOINT_LISTEN.1.clone(), ENDPOINT_LISTEN.0.port()),
+        false,
+    )
+    .await
+    .unwrap();
+    let client_quic_2 = client_quic.clone();
+    tokio::spawn(async move {
+        client_quic_2.run_tunnel(server_2).await.unwrap();
+    });
+
+    let mut client_sock_2 = protocols::tcp::connect(
+        &TUNNEL_LISTEN.1,
+        9997,
+        SoMark::new(None),
+        Duration::from_secs(10),
+        &dns_resolver,
+    )
+    .await
+    .unwrap();
+
+    client_sock_2.write_all(b"Hello 2").await.unwrap();
+    let mut dd_2 = tcp_listener.next().await.unwrap().unwrap();
+    buf.clear();
+    dd_2.read_buf(&mut buf).await.unwrap();
+    assert_eq!(&buf[..7], b"Hello 2");
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let accepted = client_quic
+        .quic_state
+        .lock()
+        .await
+        .as_ref()
+        .unwrap()
+        .zero_rtt_accepted
+        .load(std::sync::atomic::Ordering::SeqCst);
+    assert!(accepted, "Expected 0-RTT to be accepted on the second connection");
+}

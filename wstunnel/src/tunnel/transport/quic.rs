@@ -42,7 +42,7 @@ use std::future::Future;
 use std::io;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
@@ -573,6 +573,7 @@ pub struct QuicClientState {
     pub(crate) _endpoint: quinn::Endpoint,
     pub(crate) connection: quinn::Connection,
     pub(crate) datagram_hub: Arc<QuicDatagramHub>,
+    pub(crate) zero_rtt_accepted: Arc<AtomicBool>,
 }
 
 /// Build a `quinn::TransportConfig` from the explicit wstunnel QUIC settings.
@@ -675,27 +676,31 @@ async fn establish_new_connection(client: &WsClient<impl crate::TokioExecutorRef
         match connecting.into_0rtt() {
             Ok((connection, accepted)) => {
                 info!("Attempting QUIC 0-RTT with {server_addr}");
+                let zero_rtt_accepted = Arc::new(AtomicBool::new(false));
+                let zero_rtt_accepted_clone = zero_rtt_accepted.clone();
                 client.executor.clone().spawn(async move {
                     if accepted.await {
                         info!("QUIC 0-RTT accepted by {server_addr}");
+                        zero_rtt_accepted_clone.store(true, Ordering::SeqCst);
                     } else {
                         info!("QUIC 0-RTT rejected by {server_addr}");
                     }
                 });
-                connection
+                (connection, Some(zero_rtt_accepted))
             }
             Err(connecting) => {
                 debug!("QUIC 0-RTT not available yet for {server_addr}, continuing with 1-RTT");
-                connecting
+                (connecting
                     .await
-                    .with_context(|| format!("QUIC handshake failed with {server_addr}"))?
+                    .with_context(|| format!("QUIC handshake failed with {server_addr}"))?, None)
             }
         }
     } else {
-        connecting
+        (connecting
             .await
-            .with_context(|| format!("QUIC handshake failed with {server_addr}"))?
+            .with_context(|| format!("QUIC handshake failed with {server_addr}"))?, None)
     };
+    let (connection, zero_rtt_accepted) = connection;
     let datagram_hub = QuicDatagramHub::new(connection.clone());
     client.executor.clone().spawn(datagram_hub.clone().run());
     info!("QUIC connection established with {server_addr}");
@@ -703,6 +708,7 @@ async fn establish_new_connection(client: &WsClient<impl crate::TokioExecutorRef
         _endpoint: endpoint,
         connection,
         datagram_hub,
+        zero_rtt_accepted: zero_rtt_accepted.unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
     })
 }
 

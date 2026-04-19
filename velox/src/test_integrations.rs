@@ -276,8 +276,8 @@ async fn client_quic(
 /// relay (lossy or otherwise) between the client and the real QUIC server.
 #[cfg(feature = "quic")]
 async fn client_quic_at_port(dns_resolver: DnsResolver, target_port: u16) -> WsClient {
-    let tls_connector = tls::tls_connector(false, TransportScheme::Quic.alpn_protocols(), true, None, None, None)
-        .unwrap();
+    let tls_connector =
+        tls::tls_connector(false, TransportScheme::Quic.alpn_protocols(), true, None, None, None).unwrap();
 
     let client_config = WsClientConfig {
         remote_addr: TransportAddr::new(
@@ -537,7 +537,10 @@ async fn test_udp_tunnel(
 #[tokio::test]
 #[serial]
 async fn test_tcp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
-    let server_h = tokio::spawn(server_quic(dns_resolver.clone(), quic_server_tls(None)).serve(no_restrictions, tokio_util::sync::CancellationToken::new()));
+    let server_h = tokio::spawn(
+        server_quic(dns_resolver.clone(), quic_server_tls(None))
+            .serve(no_restrictions, tokio_util::sync::CancellationToken::new()),
+    );
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -579,7 +582,10 @@ async fn test_tcp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: 
 #[tokio::test]
 #[serial]
 async fn test_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
-    let server_h = tokio::spawn(server_quic(dns_resolver.clone(), quic_server_tls(None)).serve(no_restrictions, tokio_util::sync::CancellationToken::new()));
+    let server_h = tokio::spawn(
+        server_quic(dns_resolver.clone(), quic_server_tls(None))
+            .serve(no_restrictions, tokio_util::sync::CancellationToken::new()),
+    );
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -625,7 +631,10 @@ async fn test_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: 
 #[tokio::test]
 #[serial]
 async fn test_reverse_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
-    let server_h = tokio::spawn(server_quic(dns_resolver.clone(), quic_server_tls(None)).serve(no_restrictions, tokio_util::sync::CancellationToken::new()));
+    let server_h = tokio::spawn(
+        server_quic(dns_resolver.clone(), quic_server_tls(None))
+            .serve(no_restrictions, tokio_util::sync::CancellationToken::new()),
+    );
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -690,7 +699,8 @@ async fn test_reverse_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_re
 async fn test_quic_mtls_rejects_wrong_path_prefix(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
     let (client_certificate, client_key, client_ca_certificates) = build_client_mtls_material("expected-quic-cn");
     let server_h = tokio::spawn(
-        server_quic(dns_resolver.clone(), quic_server_tls(Some(client_ca_certificates))).serve(no_restrictions, tokio_util::sync::CancellationToken::new()),
+        server_quic(dns_resolver.clone(), quic_server_tls(Some(client_ca_certificates)))
+            .serve(no_restrictions, tokio_util::sync::CancellationToken::new()),
     );
     defer! { server_h.abort(); };
 
@@ -780,9 +790,10 @@ async fn test_tcp_tunnel_quic_0rtt(no_restrictions: RestrictionsRules, dns_resol
     c_cfg.quic_0rtt = true;
     client_quic.config = Arc::new(c_cfg);
 
-    let server_1 = TcpTunnelListener::new(TUNNEL_LISTEN.0, (ENDPOINT_LISTEN.1.clone(), ENDPOINT_LISTEN.0.port()), false)
-        .await
-        .unwrap();
+    let server_1 =
+        TcpTunnelListener::new(TUNNEL_LISTEN.0, (ENDPOINT_LISTEN.1.clone(), ENDPOINT_LISTEN.0.port()), false)
+            .await
+            .unwrap();
     let client_quic_1 = client_quic.clone();
     tokio::spawn(async move {
         client_quic_1.run_tunnel(server_1).await.unwrap();
@@ -910,8 +921,8 @@ async fn test_quic_connection_migration(no_restrictions: RestrictionsRules, dns_
         let state = state_guard
             .as_ref()
             .expect("QUIC client state should exist after the first exchange");
-        let new_socket = std::net::UdpSocket::bind("127.0.0.1:0")
-            .expect("failed to bind replacement UDP socket for migration test");
+        let new_socket =
+            std::net::UdpSocket::bind("127.0.0.1:0").expect("failed to bind replacement UDP socket for migration test");
         state
             ._endpoint
             .rebind(new_socket)

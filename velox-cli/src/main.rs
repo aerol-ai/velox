@@ -107,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
             tokio::spawn(async move {
                 #[cfg(unix)]
                 let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
-                
+
                 #[cfg(unix)]
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {},

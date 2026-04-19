@@ -694,15 +694,21 @@ async fn establish_new_connection(client: &WsClient<impl crate::TokioExecutorRef
             }
             Err(connecting) => {
                 debug!("QUIC 0-RTT not available yet for {server_addr}, continuing with 1-RTT");
-                (connecting
-                    .await
-                    .with_context(|| format!("QUIC handshake failed with {server_addr}"))?, None)
+                (
+                    connecting
+                        .await
+                        .with_context(|| format!("QUIC handshake failed with {server_addr}"))?,
+                    None,
+                )
             }
         }
     } else {
-        (connecting
-            .await
-            .with_context(|| format!("QUIC handshake failed with {server_addr}"))?, None)
+        (
+            connecting
+                .await
+                .with_context(|| format!("QUIC handshake failed with {server_addr}"))?,
+            None,
+        )
     };
     let (connection, zero_rtt_accepted) = connection;
     let datagram_hub = QuicDatagramHub::new(connection.clone());

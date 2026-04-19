@@ -96,23 +96,39 @@ jobs:
       # ── Update README test-status section ────────────────────────────────────
       - name: Update README test status
         if: always()
+        env:
+          CI_STATUS_EMOJI: ${{ steps.parse.outputs.status_emoji }}
+          CI_STATUS_TEXT: ${{ steps.parse.outputs.status_text }}
+          CI_PASSED: ${{ steps.parse.outputs.passed }}
+          CI_FAILED: ${{ steps.parse.outputs.failed }}
+          CI_IGNORED: ${{ steps.parse.outputs.ignored }}
+          CI_BRANCH: ${{ steps.parse.outputs.branch }}
+          CI_DATE: ${{ steps.parse.outputs.date }}
         run: |
-          BLOCK="<!-- CI_TEST_RESULTS_START -->
-          | Metric | Value |
-          |--------|-------|
-          | Status | ${{ steps.parse.outputs.status_emoji }} ${{ steps.parse.outputs.status_text }} |
-          | Passed | ${{ steps.parse.outputs.passed }} |
-          | Failed | ${{ steps.parse.outputs.failed }} |
-          | Ignored | ${{ steps.parse.outputs.ignored }} |
-          | Branch | \`${{ steps.parse.outputs.branch }}\` |
-          | Last run | ${{ steps.parse.outputs.date }} |
-          <!-- CI_TEST_RESULTS_END -->"
-
-          # Replace the markers block in README.md
-          perl -i -0pe \
-            's|<!-- CI_TEST_RESULTS_START -->.*?<!-- CI_TEST_RESULTS_END -->|'"$BLOCK"'|s' \
-            README.md
-
+          # Write the updater script to a temp file so we don't have to embed
+          # Python or Perl code with "|" chars inside a YAML run: | block.
+          cat > /tmp/update_readme.py << 'SCRIPT_END'
+          import re, os, pathlib
+          e = os.environ
+          block = (
+              "<!-- CI_TEST_RESULTS_START -->\n"
+              "| Metric | Value |\n"
+              "|--------|-------|\n"
+              "| Status | " + e["CI_STATUS_EMOJI"] + " " + e["CI_STATUS_TEXT"] + " |\n"
+              "| Passed | " + e["CI_PASSED"] + " |\n"
+              "| Failed | " + e["CI_FAILED"] + " |\n"
+              "| Ignored | " + e["CI_IGNORED"] + " |\n"
+              "| Branch | `" + e["CI_BRANCH"] + "` |\n"
+              "| Last run | " + e["CI_DATE"] + " |\n"
+              "<!-- CI_TEST_RESULTS_END -->"
+          )
+          readme = pathlib.Path("README.md").read_text()
+          updated = re.sub(
+              r"<!-- CI_TEST_RESULTS_START -->.*?<!-- CI_TEST_RESULTS_END -->",
+              block, readme, flags=re.DOTALL)
+          pathlib.Path("README.md").write_text(updated)
+          SCRIPT_END
+          python3 /tmp/update_readme.py
       # ── Commit back to PR branch (same-repo PRs) ─────────────────────────────
       - name: Commit README update (same-repo PR)
         if: |

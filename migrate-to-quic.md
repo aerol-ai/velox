@@ -119,12 +119,10 @@ New CLI flags (all on both `Client` and `Server`):
 
 - `--quic-max-streams N` (default 1024) — per-connection stream budget.
 - `--quic-keep-alive SECS` (default 15) — QUIC-level PING.
-- `--quic-initial-mtu BYTES` (default 1200) — PMTU floor.
-- `--quic-0rtt` — enable 0-RTT on the client; the server always advertises.
-- `--quic-congestion {cubic,bbr,newreno}` (default `bbr`).
+- `--quic-max-idle-timeout SECS` (default 60) — close idle QUIC connections without transport traffic.
+- `--quic-datagram-buffer-size BYTES` (default 1048576) — send/receive buffer budget for QUIC DATAGRAM tunnels.
+- `--quic-0rtt` — explicit opt-in on both client and server before 0-RTT is attempted or accepted.
 - `--quic-disable-migration` — escape hatch if migration causes middlebox issues.
-
-Server also gets `--quic-max-idle-timeout SECS` and `--quic-max-datagram-frame-size BYTES`.
 
 ### 5.2 Scheme recognition
 

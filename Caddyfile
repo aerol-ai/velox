@@ -1,0 +1,25 @@
+# Velox + Caddy configuration
+# Set VELOX_DOMAIN in your .env file (or shell) before running docker compose up.
+# Caddy automatically obtains and renews TLS certificates via ACME (Let's Encrypt).
+# For local development use VELOX_DOMAIN=localhost - Caddy will issue a local cert.
+
+{$VELOX_DOMAIN:localhost} {
+    # Reverse-proxy all WebSocket and HTTP traffic to the velox server.
+    # Caddy handles the Upgrade/Connection headers automatically.
+    reverse_proxy velox:8080 {
+        # Increase timeouts for long-lived tunnel connections
+        transport http {
+            read_timeout  0
+            write_timeout 0
+        }
+        # Pass real client IP to velox logs
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP       {remote_host}
+    }
+
+    # Access logs (remove or adjust verbosity as needed)
+    log {
+        output stderr
+        level  INFO
+    }
+}

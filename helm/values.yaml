@@ -1,0 +1,169 @@
+# Default values for the velox Helm chart.
+# Override any value with --set key=value or a custom values.yaml file.
+
+# ── Replicas ─────────────────────────────────────────────────────────────────
+replicaCount: 1
+
+# ── Image ─────────────────────────────────────────────────────────────────────
+image:
+  repository: ghcr.io/aerol-ai/velox
+  pullPolicy: IfNotPresent
+  # Defaults to Chart.AppVersion when empty.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Service account ───────────────────────────────────────────────────────────
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+# ── Pod ───────────────────────────────────────────────────────────────────────
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# ── Velox server configuration ────────────────────────────────────────────────
+velox:
+  # Log verbosity: TRACE | DEBUG | INFO | WARN | ERROR | OFF
+  logLevel: INFO
+
+  # WebSocket upgrade path prefix - acts as a shared secret.
+  # Clients must pass -P <prefix>. Leave empty to accept any prefix (insecure).
+  httpUpgradePathPrefix: ""
+
+  # Static tunnel destination allowlist.
+  # Each entry is "host:port". Takes precedence over restrictConfig.
+  # Example:
+  #   restrictTo:
+  #     - "10.0.0.1:22"
+  #     - "db.internal:5432"
+  restrictTo: []
+
+  # Mount a restrictions.yaml file from a ConfigMap.
+  restrictConfig:
+    # Set to true to create a ConfigMap and mount it as /etc/velox/restrictions.yaml.
+    enabled: false
+    # Inline YAML content for the restrictions file.
+    # See https://github.com/aerol-ai/velox/blob/main/restrictions.yaml for schema.
+    content: |
+      tunnels:
+        - allow:
+            - protocol: "^.*$"
+              port:
+                - start: 1
+                  end: 65535
+              host: ".*"
+
+  # ── QUIC transport ──────────────────────────────────────────────────────────
+  # QUIC is a UDP-based transport. The server binds a *separate UDP port* in
+  # addition to the WebSocket/HTTP2 TCP port. Ingress controllers cannot proxy
+  # UDP, so QUIC is exposed via a dedicated LoadBalancer or NodePort service.
+  # The Docker image is built with --features quic by default.
+  quic:
+    # Set to true to enable the QUIC listener and create the QUIC UDP service.
+    enabled: false
+    # UDP port the velox server listens on for QUIC connections.
+    port: 8443
+    # Kubernetes Service type for the QUIC UDP port.
+    # LoadBalancer - cloud-provisioned external IP (recommended for production).
+    # NodePort    - for on-prem / bare-metal clusters.
+    serviceType: LoadBalancer
+    # Optional QUIC tuning flags. Uncomment to override velox defaults.
+    # keepAlive: "15s"             # keep-alive interval (default 15s; 0 = off)
+    # maxIdleTimeout: "60s"        # max idle timeout  (default 60s; 0 = off)
+    # maxStreams: 1024              # max concurrent bi-directional streams
+    # datagramBufferSize: 1048576  # DATAGRAM buffer size in bytes
+    # zeroRtt: false               # enable 0-RTT (replay risk - off by default)
+    # disableMigration: false      # disable QUIC connection migration
+
+  # Extra raw CLI flags passed verbatim after the tunnel address.
+  # Example: ["--websocket-ping-frequency-sec", "60"]
+  extraArgs: []
+
+# ── Service (WebSocket / HTTP2 over TCP) ──────────────────────────────────────
+service:
+  type: ClusterIP
+  port: 8080
+  containerPort: 8080
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+# Enable ingress to expose velox through an ingress controller (nginx, traefik …).
+# TLS is terminated at the ingress; velox runs plain WebSocket internally.
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    # nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # nginx.ingress.kubernetes.io/proxy-connect-timeout: "3600"
+  hosts:
+    - host: velox.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  # Example TLS:
+  #   - secretName: velox-tls
+  #     hosts:
+  #       - velox.example.com
+
+# ── Resources ─────────────────────────────────────────────────────────────────
+resources: {}
+# Recommended starting point:
+#   requests:
+#     cpu: 50m
+#     memory: 64Mi
+#   limits:
+#     memory: 256Mi
+
+# ── Autoscaling ───────────────────────────────────────────────────────────────
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+# ── Storage (optional persistence for TLS certs if using velox with built-in TLS) ─
+persistence:
+  enabled: false
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 100Mi
+
+# ── Scheduling ────────────────────────────────────────────────────────────────
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ── Liveness / readiness ──────────────────────────────────────────────────────
+# Velox has no HTTP health endpoint; we use a TCP socket probe.
+livenessProbe:
+  tcpSocket:
+    port: ws
+  initialDelaySeconds: 5
+  periodSeconds: 30
+  failureThreshold: 3
+
+readinessProbe:
+  tcpSocket:
+    port: ws
+  initialDelaySeconds: 3
+  periodSeconds: 10

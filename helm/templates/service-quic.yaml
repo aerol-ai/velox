@@ -1,0 +1,24 @@
+{{- if .Values.velox.quic.enabled }}
+# Dedicated UDP service for QUIC transport.
+# Ingress controllers cannot proxy UDP; this service is exposed directly
+# as LoadBalancer or NodePort so clients can reach the QUIC listener.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "velox.fullname" . }}-quic
+  labels:
+    {{- include "velox.labels" . | nindent 4 }}
+    app.kubernetes.io/component: quic
+  annotations:
+    # Hint for cloud load-balancers that this is a UDP service.
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: {{ .Values.velox.quic.serviceType | default "LoadBalancer" }}
+  ports:
+    - port: {{ .Values.velox.quic.port }}
+      targetPort: quic-udp
+      protocol: UDP
+      name: quic-udp
+  selector:
+    {{- include "velox.selectorLabels" . | nindent 4 }}
+{{- end }}

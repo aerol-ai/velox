@@ -346,28 +346,33 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         Ok(endpoint)
     }
 
-    pub async fn serve(self, restrictions: RestrictionsRules, shutdown: tokio_util::sync::CancellationToken) -> anyhow::Result<()> {
+    pub async fn serve(
+        self,
+        restrictions: RestrictionsRules,
+        shutdown: tokio_util::sync::CancellationToken,
+    ) -> anyhow::Result<()> {
         info!("Starting velox server listening on {}", self.config.bind);
 
         // setup upgrade request handler
-        let mk_websocket_upgrade_fn = |server: WsServer<_>,
-                                       restrictions: Arc<ArcSwap<RestrictionsRules>>,
-                                       restrict_path: Option<String>,
-                                       client_addr: SocketAddr,
-                                       shutdown: tokio_util::sync::CancellationToken| {
-            move |req: Request<Incoming>| {
-                ws_server_upgrade(
-                    server.clone(),
-                    restrictions.load().clone(),
-                    restrict_path.clone(),
-                    client_addr,
-                    req,
-                    shutdown.clone(),
-                )
-                .map::<anyhow::Result<_>, _>(Ok)
-                .instrument(mk_span())
-            }
-        };
+        let mk_websocket_upgrade_fn =
+            |server: WsServer<_>,
+             restrictions: Arc<ArcSwap<RestrictionsRules>>,
+             restrict_path: Option<String>,
+             client_addr: SocketAddr,
+             shutdown: tokio_util::sync::CancellationToken| {
+                move |req: Request<Incoming>| {
+                    ws_server_upgrade(
+                        server.clone(),
+                        restrictions.load().clone(),
+                        restrict_path.clone(),
+                        client_addr,
+                        req,
+                        shutdown.clone(),
+                    )
+                    .map::<anyhow::Result<_>, _>(Ok)
+                    .instrument(mk_span())
+                }
+            };
 
         let mk_http_upgrade_fn = |server: WsServer<_>,
                                   restrictions: Arc<ArcSwap<RestrictionsRules>>,
@@ -527,8 +532,13 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                                     conn_builder.keep_alive_interval(ping);
                                 }
 
-                                let http_upgrade_fn =
-                                    mk_http_upgrade_fn(server, restrictions, restrict_path, peer_addr, shutdown_for_conn.clone());
+                                let http_upgrade_fn = mk_http_upgrade_fn(
+                                    server,
+                                    restrictions,
+                                    restrict_path,
+                                    peer_addr,
+                                    shutdown_for_conn.clone(),
+                                );
                                 let con_fut = conn_builder.serve_connection(tls_stream, service_fn(http_upgrade_fn));
                                 if let Err(e) = con_fut.await {
                                     error!("Error while upgrading cnx to http: {:?}", e);
@@ -536,8 +546,13 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                             }
                             // websocket
                             _ => {
-                                let websocket_upgrade_fn =
-                                    mk_websocket_upgrade_fn(server, restrictions, restrict_path, peer_addr, shutdown_for_conn.clone());
+                                let websocket_upgrade_fn = mk_websocket_upgrade_fn(
+                                    server,
+                                    restrictions,
+                                    restrict_path,
+                                    peer_addr,
+                                    shutdown_for_conn.clone(),
+                                );
                                 let conn_fut = http1::Builder::new()
                                     .timer(TokioTimer::new())
                                     // https://github.com/aerol-ai/velox/issues/358
@@ -565,7 +580,8 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                             conn_fut.http2().keep_alive_interval(ping);
                         }
 
-                        let websocket_upgrade_fn = mk_auto_upgrade_fn(server, restrictions, None, peer_addr, shutdown_for_conn);
+                        let websocket_upgrade_fn =
+                            mk_auto_upgrade_fn(server, restrictions, None, peer_addr, shutdown_for_conn);
                         let upgradable =
                             conn_fut.serve_connection_with_upgrades(stream, service_fn(websocket_upgrade_fn));
 

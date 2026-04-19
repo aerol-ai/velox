@@ -166,7 +166,7 @@ impl UdpStream {
         (s, io)
     }
 
-    #[cfg_attr(not(target_os = "linux"), expect(dead_code))]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.send_socket.local_addr()
     }

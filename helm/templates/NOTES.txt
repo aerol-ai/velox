@@ -1,0 +1,41 @@
+Velox has been deployed successfully!
+
+=== Server Info ===
+  Release : {{ .Release.Name }}
+  Image   : {{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}
+
+=== Connecting from a client ===
+
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  {{- if $.Values.ingress.tls }}
+  Server URL : wss://{{ .host }}
+  {{- else }}
+  Server URL : ws://{{ .host }}
+  {{- end }}
+{{- end }}
+
+  velox client -L socks5://127.0.0.1:1080 wss://{{ (index .Values.ingress.hosts 0).host }}
+
+{{- else if contains "NodePort" .Values.service.type }}
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} \
+    -o jsonpath="{.items[0].status.addresses[0].address}")
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} \
+    -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "velox.fullname" . }})
+  velox client -L socks5://127.0.0.1:1080 ws://$NODE_IP:$NODE_PORT
+
+{{- else if contains "LoadBalancer" .Values.service.type }}
+  # Wait for the external IP to be assigned:
+  kubectl get svc --namespace {{ .Release.Namespace }} {{ include "velox.fullname" . }} --watch
+  export LB_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} \
+    {{ include "velox.fullname" . }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  velox client -L socks5://127.0.0.1:1080 ws://$LB_IP:{{ .Values.service.port }}
+
+{{- else }}
+  # Port-forward for local testing:
+  kubectl port-forward --namespace {{ .Release.Namespace }} \
+    svc/{{ include "velox.fullname" . }} 8080:{{ .Values.service.port }}
+  velox client -L socks5://127.0.0.1:1080 ws://127.0.0.1:8080
+{{- end }}
+
+For full setup instructions see setup/helm-setup.md in the repository.

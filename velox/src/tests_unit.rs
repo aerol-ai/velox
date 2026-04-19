@@ -25,8 +25,8 @@ mod tests {
         AllowConfig, AllowReverseTunnelConfig, AllowTunnelConfig, MatchConfig, RestrictionConfig, RestrictionsRules,
         ReverseTunnelConfigProtocol, TunnelConfigProtocol, default_cidr, default_host,
     };
-    use crate::tunnel::transport::{JwtTunnelConfig, jwt_token_to_tunnel, tunnel_to_jwt_token};
     use crate::tunnel::transport::TransportScheme;
+    use crate::tunnel::transport::{JwtTunnelConfig, jwt_token_to_tunnel, tunnel_to_jwt_token};
     use crate::tunnel::{LocalProtocol, RemoteAddr, to_host_port, try_to_sock_addr};
     use ipnet::IpNet;
     use regex::Regex;
@@ -217,10 +217,7 @@ mod tests {
     fn test_try_to_sock_addr_ipv4() {
         let result = try_to_sock_addr((Host::Ipv4(Ipv4Addr::LOCALHOST), 80));
         assert!(result.is_ok());
-        assert_eq!(
-            result.unwrap(),
-            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 80))
-        );
+        assert_eq!(result.unwrap(), SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 80)));
     }
 
     #[test]
@@ -477,10 +474,7 @@ mod tests {
 
     #[test]
     fn test_restrictions_multiple_restrict_to() {
-        let restrict_to = vec![
-            ("example.com".to_string(), 443),
-            ("10.0.0.1".to_string(), 80),
-        ];
+        let restrict_to = vec![("example.com".to_string(), 443), ("10.0.0.1".to_string(), 80)];
         let rules = RestrictionsRules::from_path_prefix(&[], &restrict_to).unwrap();
         assert_eq!(rules.restrictions[0].allow.len(), 2);
     }
@@ -862,10 +856,7 @@ mod tests {
             timeout: None,
             credentials: None,
         };
-        assert_eq!(
-            ReverseTunnelConfigProtocol::from(&p),
-            ReverseTunnelConfigProtocol::Socks5
-        );
+        assert_eq!(ReverseTunnelConfigProtocol::from(&p), ReverseTunnelConfigProtocol::Socks5);
     }
 
     #[test]
@@ -873,10 +864,7 @@ mod tests {
         let p = LocalProtocol::ReverseUnix {
             path: PathBuf::from("/x"),
         };
-        assert_eq!(
-            ReverseTunnelConfigProtocol::from(&p),
-            ReverseTunnelConfigProtocol::Unix
-        );
+        assert_eq!(ReverseTunnelConfigProtocol::from(&p), ReverseTunnelConfigProtocol::Unix);
     }
 
     #[test]
@@ -885,19 +873,13 @@ mod tests {
             timeout: None,
             credentials: None,
         };
-        assert_eq!(
-            ReverseTunnelConfigProtocol::from(&p),
-            ReverseTunnelConfigProtocol::HttpProxy
-        );
+        assert_eq!(ReverseTunnelConfigProtocol::from(&p), ReverseTunnelConfigProtocol::HttpProxy);
     }
 
     #[test]
     fn test_tcp_to_reverse_config_protocol_unknown() {
         let p = LocalProtocol::Tcp { proxy_protocol: false };
-        assert_eq!(
-            ReverseTunnelConfigProtocol::from(&p),
-            ReverseTunnelConfigProtocol::Unknown
-        );
+        assert_eq!(ReverseTunnelConfigProtocol::from(&p), ReverseTunnelConfigProtocol::Unknown);
     }
 
     #[test]
@@ -1106,7 +1088,9 @@ mod tests {
         #[test]
         fn test_parse_tunnel_arg_udp_with_timeout() {
             let lt = parse_tunnel_arg("udp://5353:1.1.1.1:53?timeout_sec=60").unwrap();
-            assert!(matches!(lt.local_protocol, LocalProtocol::Udp { timeout: Some(d) } if d == Duration::from_secs(60)));
+            assert!(
+                matches!(lt.local_protocol, LocalProtocol::Udp { timeout: Some(d) } if d == Duration::from_secs(60))
+            );
         }
 
         #[test]
@@ -1208,10 +1192,7 @@ mod tests {
     #[test]
     fn test_extract_path_prefix_no_events_suffix() {
         use crate::tunnel::server::utils::{PathPrefixErr, extract_path_prefix};
-        assert_eq!(
-            extract_path_prefix("/pfx/something"),
-            Err(PathPrefixErr::BadUpgradeRequest)
-        );
+        assert_eq!(extract_path_prefix("/pfx/something"), Err(PathPrefixErr::BadUpgradeRequest));
     }
 
     // ======================================================================
@@ -1373,12 +1354,7 @@ mod tests {
 
     #[test]
     fn test_to_host_port_roundtrip_ipv6() {
-        let original = SocketAddr::V6(SocketAddrV6::new(
-            Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1),
-            8080,
-            0,
-            0,
-        ));
+        let original = SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1), 8080, 0, 0));
         let (host, port) = to_host_port(original);
         let back = try_to_sock_addr((host, port)).unwrap();
         assert_eq!(original, back);

@@ -1,16 +1,16 @@
 use super::udp_server::{Socks5UdpStream, Socks5UdpStreamWriter};
 use crate::tunnel::LocalProtocol;
 use anyhow::Context;
-use fast_socks5::server::{Config, DenyAuthentication, SimpleUserPassword, Socks5Server};
+use fast_socks5::server::Socks5ServerProtocol;
 use fast_socks5::util::target_addr::TargetAddr;
-use fast_socks5::{ReplyError, consts};
 use futures_util::{Stream, StreamExt, stream};
 use std::io::{Error, IoSlice};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadBuf};
+use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::select;
@@ -77,117 +77,113 @@ pub async fn run_server(
         bind, credentials
     );
 
-    let server = Socks5Server::<DenyAuthentication>::bind(bind)
+    let listener = TcpListener::bind(bind)
         .await
         .with_context(|| format!("Cannot create socks5 server {bind:?}"))?;
 
-    let mut cfg = Config::default();
-    cfg = if let Some((username, password)) = credentials {
-        cfg.set_allow_no_auth(false);
-        cfg.with_authentication(SimpleUserPassword { username, password })
-    } else {
-        cfg.set_allow_no_auth(true);
-        cfg
-    };
-
-    cfg.set_dns_resolve(false);
-    cfg.set_execute_command(false);
-    cfg.set_udp_support(true);
-
     let udp_server = super::udp_server::run_server(bind, timeout).await?;
-    let server = server.with_config(cfg);
     let stream = stream::unfold(
-        (server, Box::pin(udp_server), JoinSet::new()),
-        move |(server, mut udp_server, mut tasks)| async move {
-            let mut acceptor = server.incoming();
-            loop {
-                let cnx = select! {
-                    biased;
+        (listener, Box::pin(udp_server), JoinSet::new()),
+        move |(listener, mut udp_server, mut tasks)| {
+            let credentials = credentials.clone();
+            async move {
+                loop {
+                    let socket = select! {
+                        biased;
 
-                    cnx = acceptor.next() => match cnx {
-                        None => return None,
-                        Some(Err(err)) => {
-                            drop(acceptor);
-                            return Some((Err(anyhow::Error::new(err)), (server, udp_server, tasks)));
+                        result = listener.accept() => match result {
+                            Err(err) => {
+                                return Some((Err(anyhow::Error::new(err)), (listener, udp_server, tasks)));
+                            }
+                            Ok((socket, _)) => socket,
+                        },
+
+                        // new incoming udp stream
+                        udp_conn = udp_server.next() => {
+                            return match udp_conn {
+                                Some(Ok(stream)) => {
+                                    let dest = stream.destination();
+                                    let writer = stream.writer();
+                                    Some((Ok((Socks5Stream::Udp((stream, writer)), dest)), (listener, udp_server, tasks)))
+                                }
+                                Some(Err(err)) => {
+                                    Some((Err(anyhow::Error::new(err)), (listener, udp_server, tasks)))
+                                }
+                                None => {
+                                    None
+                                }
+                            };
                         }
-                        Some(Ok(cnx)) => cnx,
-                    },
+                    };
 
-                    // new incoming udp stream
-                    udp_conn = udp_server.next() => {
-                        drop(acceptor);
-                        return match udp_conn {
-                            Some(Ok(stream)) => {
-                                let dest = stream.destination();
-                                let writer = stream.writer();
-                                Some((Ok((Socks5Stream::Udp((stream, writer)), dest)), (server, udp_server, tasks)))
-                            }
-                            Some(Err(err)) => {
-                                Some((Err(anyhow::Error::new(err)), (server, udp_server, tasks)))
-                            }
-                            None => {
-                                None
+                    // Perform SOCKS5 handshake
+                    let result = if let Some((username, password)) = &credentials {
+                        let username = username.clone();
+                        let password = password.clone();
+                        Socks5ServerProtocol::accept_password_auth(socket, move |u, p| u == username && p == password)
+                            .await
+                            .map(|(proto, _)| proto)
+                    } else {
+                        Socks5ServerProtocol::accept_no_auth(socket).await
+                    };
+
+                    let proto = match result {
+                        Ok(p) => p,
+                        Err(err) => {
+                            warn!("Rejecting socks5 cnx: {}", err);
+                            continue;
+                        }
+                    };
+
+                    let (proto, cmd, target) = match proto.read_command().await {
+                        Ok(t) => t,
+                        Err(err) => {
+                            warn!("Rejecting socks5 cnx: {}", err);
+                            continue;
+                        }
+                    };
+
+                    let (host, port) = match &target {
+                        TargetAddr::Ip(SocketAddr::V4(ip)) => (Host::Ipv4(*ip.ip()), ip.port()),
+                        TargetAddr::Ip(SocketAddr::V6(ip)) => (Host::Ipv6(*ip.ip()), ip.port()),
+                        TargetAddr::Domain(host, port) => (Host::Domain(host.clone()), *port),
+                    };
+
+                    // Special case for UDP Associate
+                    if matches!(cmd, fast_socks5::Socks5Command::UDPAssociate) {
+                        let mut cnx = match proto.reply_success(bind).await {
+                            Ok(c) => c,
+                            Err(err) => {
+                                warn!("Cannot reply to socks5 udp client: {}", err);
+                                continue;
                             }
                         };
-                    }
-                };
-
-                let cnx = match cnx.upgrade_to_socks5().await {
-                    Ok(cnx) => cnx,
-                    Err(err) => {
-                        warn!("Rejecting socks5 cnx: {}", err);
-                        continue;
-                    }
-                };
-
-                let Some(target) = cnx.target_addr() else {
-                    warn!("Rejecting socks5 cnx: no target addr");
-                    continue;
-                };
-
-                let (host, port) = match target {
-                    TargetAddr::Ip(SocketAddr::V4(ip)) => (Host::Ipv4(*ip.ip()), ip.port()),
-                    TargetAddr::Ip(SocketAddr::V6(ip)) => (Host::Ipv6(*ip.ip()), ip.port()),
-                    TargetAddr::Domain(host, port) => (Host::Domain(host.clone()), *port),
-                };
-
-                // Special case for UDP Associate where we return the bind addr of the udp server
-                if matches!(cnx.cmd(), Some(fast_socks5::Socks5Command::UDPAssociate)) {
-                    let mut cnx = cnx.into_inner();
-                    let ret = cnx.write_all(&new_reply(&ReplyError::Succeeded, bind)).await;
-
-                    if let Err(err) = ret {
-                        warn!("Cannot reply to socks5 udp client: {}", err);
-                        continue;
-                    }
-                    tasks.spawn(async move {
-                        let mut buf = [0u8; 8];
-                        loop {
-                            match cnx.read(&mut buf).await {
-                                Ok(0) => return,
-                                Err(_) => return,
-                                _ => {}
+                        tasks.spawn(async move {
+                            let mut buf = [0u8; 8];
+                            loop {
+                                match cnx.read(&mut buf).await {
+                                    Ok(0) => return,
+                                    Err(_) => return,
+                                    _ => {}
+                                }
                             }
+                        });
+                        continue;
+                    }
+
+                    let cnx = match proto
+                        .reply_success(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0))
+                        .await
+                    {
+                        Ok(c) => c,
+                        Err(err) => {
+                            warn!("Cannot reply to socks5 client: {}", err);
+                            continue;
                         }
-                    });
-                    continue;
-                };
+                    };
 
-                let mut cnx = cnx.into_inner();
-                let ret = cnx
-                    .write_all(&new_reply(
-                        &ReplyError::Succeeded,
-                        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 0),
-                    ))
-                    .await;
-
-                if let Err(err) = ret {
-                    warn!("Cannot reply to socks5 client: {}", err);
-                    continue;
+                    return Some((Ok((Socks5Stream::Tcp(cnx), (host, port))), (listener, udp_server, tasks)));
                 }
-
-                drop(acceptor);
-                return Some((Ok((Socks5Stream::Tcp(cnx), (host, port))), (server, udp_server, tasks)));
             }
         },
     );
@@ -197,32 +193,6 @@ pub async fn run_server(
     };
 
     Ok(listener)
-}
-
-fn new_reply(error: &ReplyError, sock_addr: SocketAddr) -> Vec<u8> {
-    let (addr_type, mut ip_oct, mut port) = match sock_addr {
-        SocketAddr::V4(sock) => (
-            consts::SOCKS5_ADDR_TYPE_IPV4,
-            sock.ip().octets().to_vec(),
-            sock.port().to_be_bytes().to_vec(),
-        ),
-        SocketAddr::V6(sock) => (
-            consts::SOCKS5_ADDR_TYPE_IPV6,
-            sock.ip().octets().to_vec(),
-            sock.port().to_be_bytes().to_vec(),
-        ),
-    };
-
-    let mut reply = vec![
-        consts::SOCKS5_VERSION,
-        error.as_u8(), // transform the error into byte code
-        0x00,          // reserved
-        addr_type,     // address type (ipv4, v6, domain)
-    ];
-    reply.append(&mut ip_oct);
-    reply.append(&mut port);
-
-    reply
 }
 
 impl Unpin for Socks5Stream {}

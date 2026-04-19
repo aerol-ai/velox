@@ -10,17 +10,6 @@
 [![CI - Tests](https://github.com/aerol-ai/velox/actions/workflows/ci.yaml/badge.svg)](https://github.com/aerol-ai/velox/actions/workflows/ci.yaml)
 [![Docker & Helm Package](https://github.com/aerol-ai/velox/actions/workflows/docker-helm.yaml/badge.svg)](https://github.com/aerol-ai/velox/actions/workflows/docker-helm.yaml)
 
-<!-- CI_TEST_RESULTS_START -->
-| Metric | Value |
-|--------|-------|
-| Status | ✅ passing |
-| Passed | - |
-| Failed | 0 |
-| Ignored | - |
-| Branch | `main` |
-| Last run | - |
-<!-- CI_TEST_RESULTS_END -->
-
 ---
 
 ## Quick setup

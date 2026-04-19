@@ -191,6 +191,8 @@ pub async fn connect(client_cfg: &WsClientConfig, tcp_stream: TcpStream) -> anyh
         TransportAddr::Http { .. } | TransportAddr::Ws { .. } => {
             return Err(anyhow!("Transport does not support TLS: {}", client_cfg.remote_addr.scheme()));
         }
+        #[cfg(feature = "quic")]
+        TransportAddr::Quic { tls, .. } => tls,
     };
 
     if tls_config.tls_sni_disabled {

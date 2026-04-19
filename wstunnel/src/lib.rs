@@ -91,6 +91,28 @@ pub async fn create_client(
     let transport_scheme = TransportScheme::from_str(args.remote_addr.scheme()).expect("invalid scheme in server url");
     let tls = match transport_scheme {
         TransportScheme::Ws | TransportScheme::Http => None,
+        #[cfg(feature = "quic")]
+        TransportScheme::Quic => {
+            // QUIC always uses TLS (no ECH support for QUIC yet)
+            let tls_connector = tls::tls_connector(
+                args.tls_verify_certificate,
+                transport_scheme.alpn_protocols(),
+                !args.tls_sni_disable,
+                None,
+                tls_certificate,
+                tls_key,
+            )
+            .expect("Cannot create tls connector for QUIC");
+
+            Some(TlsClientConfig {
+                tls_connector: Arc::new(RwLock::new(tls_connector)),
+                tls_sni_override: args.tls_sni_override.clone(),
+                tls_verify_certificate: args.tls_verify_certificate,
+                tls_sni_disabled: args.tls_sni_disable,
+                tls_certificate_path: args.tls_certificate.clone(),
+                tls_key_path: args.tls_private_key.clone(),
+            })
+        }
         TransportScheme::Wss | TransportScheme::Https => {
             let ech_config = if args.tls_ech_enable {
                 #[cfg(not(feature = "aws-lc-rs"))]
@@ -446,6 +468,16 @@ pub async fn run_server(args: Server, executor: impl TokioExecutor) -> anyhow::R
 }
 
 async fn run_server_impl(args: Server, executor: impl TokioExecutorRef) -> anyhow::Result<()> {
+    // `quic://` on the server URL is ambiguous: the main URL drives the TCP/TLS listener, and
+    // QUIC is enabled separately via `--quic-bind`. Reject up front with a clear message instead
+    // of silently binding a plaintext TCP listener.
+    if args.remote_addr.scheme() == "quic" {
+        return Err(anyhow!(
+            "`quic://` is not valid as the server URL. Use `wss://<bind>` for the TCP listener \
+             and enable QUIC separately with `--quic-bind <addr:port>`."
+        ));
+    }
+
     let tls_config = if args.remote_addr.scheme() == "wss" {
         let tls_certificate = if let Some(cert_path) = &args.tls_certificate {
             tls::load_certificates_from_pem(cert_path).expect("Cannot load tls certificate")
@@ -522,6 +554,8 @@ async fn run_server_impl(args: Server, executor: impl TokioExecutorRef) -> anyho
         restriction_config: args.restrict_config,
         http_proxy,
         remote_server_idle_timeout: args.remote_to_local_server_idle_timeout,
+        #[cfg(feature = "quic")]
+        quic_bind: args.quic_bind,
     };
     let server = WsServer::new(server_config, executor);
 

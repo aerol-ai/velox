@@ -29,6 +29,12 @@ pub struct WsClient<E: TokioExecutorRef = DefaultTokioExecutor> {
     reverse_tunnel_connection_retry_max_backoff: Duration,
     _tls_reloader: Arc<TlsReloader>,
     pub(crate) executor: E,
+    /// Shared QUIC endpoint + connection. All tunnels from this client multiplex over the
+    /// same QUIC connection as independent streams. Lazily created on first use; cleared and
+    /// re-established when the connection dies.
+    #[cfg(feature = "quic")]
+    pub(crate) quic_state:
+        Arc<tokio::sync::Mutex<Option<crate::tunnel::transport::quic::QuicClientState>>>,
 }
 
 impl<E: TokioExecutorRef> WsClient<E> {
@@ -57,6 +63,8 @@ impl<E: TokioExecutorRef> WsClient<E> {
             reverse_tunnel_connection_retry_max_backoff,
             _tls_reloader: Arc::new(tls_reloader),
             executor,
+            #[cfg(feature = "quic")]
+            quic_state: Arc::new(tokio::sync::Mutex::new(None)),
         })
     }
 
@@ -81,6 +89,12 @@ impl<E: TokioExecutorRef> WsClient<E> {
                 tunnel::transport::http2::connect(request_id, self, remote_cfg)
                     .await
                     .map(|(r, w, response)| (TunnelReader::Http2(r), TunnelWriter::Http2(w), response))?
+            }
+            #[cfg(feature = "quic")]
+            TransportScheme::Quic => {
+                tunnel::transport::quic::connect(request_id, self, remote_cfg)
+                    .await
+                    .map(|(r, w, response)| (TunnelReader::Quic(r), TunnelWriter::Quic(w), response))?
             }
         };
 
@@ -182,6 +196,21 @@ impl<E: TokioExecutorRef> WsClient<E> {
                         .await
                     {
                         Ok((r, w, response)) => (TunnelReader::Http2(r), TunnelWriter::Http2(w), response),
+                        Err(err) => {
+                            let reconnect_delay = reconnect_delay();
+                            event!(parent: &span, Level::ERROR, "Retrying in {:?}, cannot connect to remote server: {:?}", reconnect_delay, err);
+                            tokio::time::sleep(reconnect_delay).await;
+                            continue;
+                        }
+                    }
+                }
+                #[cfg(feature = "quic")]
+                TransportScheme::Quic => {
+                    match tunnel::transport::quic::connect(request_id, &client, &remote_addr)
+                        .instrument(span.clone())
+                        .await
+                    {
+                        Ok((r, w, response)) => (TunnelReader::Quic(r), TunnelWriter::Quic(w), response),
                         Err(err) => {
                             let reconnect_delay = reconnect_delay();
                             event!(parent: &span, Level::ERROR, "Retrying in {:?}, cannot connect to remote server: {:?}", reconnect_delay, err);

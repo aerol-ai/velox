@@ -16,6 +16,10 @@ use tracing::{error, info, warn};
 struct TlsReloaderServerState {
     fs_watcher: Mutex<RecommendedWatcher>,
     tls_reload_certificate: AtomicBool,
+    /// Independent flag for the QUIC accept loop. Both flags are set on every reload event so
+    /// the TCP and QUIC paths can each consume one without racing.
+    #[cfg(feature = "quic")]
+    tls_reload_certificate_quic: AtomicBool,
     server_config: Arc<WsServerConfig>,
     cert_path: PathBuf,
     key_path: PathBuf,
@@ -66,6 +70,8 @@ impl TlsReloader {
         let this = Arc::new(TlsReloaderServerState {
             fs_watcher: Mutex::new(notify::recommended_watcher(|_| {})?),
             tls_reload_certificate: AtomicBool::new(false),
+            #[cfg(feature = "quic")]
+            tls_reload_certificate_quic: AtomicBool::new(false),
             cert_path: cert_path.to_path_buf(),
             key_path: key_path.to_path_buf(),
             client_ca_path: client_ca_certs.as_ref().map(|x| x.to_path_buf()),
@@ -134,6 +140,17 @@ impl TlsReloader {
         }
     }
 
+    /// Same as `should_reload_certificate` but for the QUIC server accept loop. Uses an
+    /// independent atomic so both consumers (TCP and QUIC) see every reload event.
+    #[cfg(feature = "quic")]
+    #[inline]
+    pub fn should_reload_certificate_quic(&self) -> bool {
+        match &self.state {
+            TlsReloaderState::Empty | Client(_) => false,
+            Server(this) => this.tls_reload_certificate_quic.swap(false, Ordering::Relaxed),
+        }
+    }
+
     fn try_rewatch_certificate(this: TlsReloaderState, path: PathBuf) {
         thread::spawn(move || {
             while !path.exists() {
@@ -193,6 +210,8 @@ impl TlsReloader {
                     Ok(tls_certs) => {
                         *tls.tls_certificate.lock() = tls_certs;
                         this.tls_reload_certificate.store(true, Ordering::Relaxed);
+                        #[cfg(feature = "quic")]
+                        this.tls_reload_certificate_quic.store(true, Ordering::Relaxed);
                     }
                     Err(err) => {
                         warn!("Error while loading TLS certificate {:?}", err);
@@ -215,6 +234,8 @@ impl TlsReloader {
                     Ok(tls_key) => {
                         *tls.tls_key.lock() = tls_key;
                         this.tls_reload_certificate.store(true, Ordering::Relaxed);
+                        #[cfg(feature = "quic")]
+                        this.tls_reload_certificate_quic.store(true, Ordering::Relaxed);
                     }
                     Err(err) => {
                         warn!("Error while loading TLS private key {:?}", err);
@@ -240,6 +261,8 @@ impl TlsReloader {
                         if let Some(client_certs) = &tls.tls_client_ca_certificates {
                             *client_certs.lock() = tls_certs;
                             this.tls_reload_certificate.store(true, Ordering::Relaxed);
+                            #[cfg(feature = "quic")]
+                            this.tls_reload_certificate_quic.store(true, Ordering::Relaxed);
                         }
                     }
                     Err(err) => {

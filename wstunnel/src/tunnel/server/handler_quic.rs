@@ -1,0 +1,238 @@
+use crate::executor::TokioExecutorRef;
+use crate::restrictions::types::RestrictionsRules;
+use crate::tunnel::RemoteAddr;
+use crate::tunnel::server::WsServer;
+use crate::tunnel::server::utils::validate_tunnel;
+use crate::tunnel::transport;
+use crate::tunnel::transport::{jwt_token_to_tunnel, tunnel_to_jwt_token};
+use crate::tunnel::transport::quic::{
+    QUIC_ALPN, QuicRequestHeader, QuicResponseHeader, QuicTunnelRead, QuicTunnelWrite, STATUS_BAD_REQUEST,
+    STATUS_FORBIDDEN, STATUS_INTERNAL_ERROR,
+};
+use anyhow::{Context, anyhow};
+use arc_swap::ArcSwap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::sync::oneshot;
+use tracing::{Instrument, Level, Span, error, info, span, warn};
+use uuid::Uuid;
+
+fn mk_quic_span() -> Span {
+    span!(
+        Level::INFO,
+        "tunnel",
+        id = tracing::field::Empty,
+        remote = tracing::field::Empty,
+        forwarded_for = tracing::field::Empty
+    )
+}
+
+/// Build a `quinn::ServerConfig` from the current TLS state. Called both on initial bind
+/// and on every cert reload.
+pub(super) fn build_quic_server_config(
+    tls_config: &crate::tunnel::server::TlsServerConfig,
+) -> anyhow::Result<quinn::ServerConfig> {
+    let cert = tls_config.tls_certificate.lock().clone();
+    let key = tls_config.tls_key.lock().clone_key();
+
+    let mut server_crypto = tokio_rustls::rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(cert, key)
+        .with_context(|| "Invalid TLS certificate or private key for QUIC")?;
+    server_crypto.alpn_protocols = vec![QUIC_ALPN.to_vec()];
+
+    let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(
+        quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)
+            .map_err(|e| anyhow!("Failed to create QUIC server crypto: {e}"))?,
+    ));
+    server_config.transport_config(crate::tunnel::transport::quic::build_transport_config()?);
+    Ok(server_config)
+}
+
+async fn send_err(send: &mut quinn::SendStream, status: u8, reason: impl Into<String>) {
+    let response = QuicResponseHeader::err(status, reason);
+    if let Err(err) = response.write(send).await {
+        warn!("Failed to send QUIC error response: {err}");
+    }
+    let _ = send.finish();
+}
+
+/// Handle a single QUIC bi-directional stream:
+///   1. Parse the request header (path prefix + JWT + auth + custom headers).
+///   2. Validate against restrictions.
+///   3. exec_tunnel to open the outbound connector or reverse listener.
+///   4. Send the response header (status + cookie for dynamic reverse tunnels).
+///   5. Splice bytes between QUIC stream and target.
+async fn handle_quic_stream(
+    server: WsServer<impl TokioExecutorRef>,
+    restrictions: Arc<RestrictionsRules>,
+    client_addr: SocketAddr,
+    mut send: quinn::SendStream,
+    mut recv: quinn::RecvStream,
+) {
+    let header = match QuicRequestHeader::read(&mut recv).await {
+        Ok(h) => h,
+        Err(err) => {
+            warn!("Malformed QUIC request header from {client_addr}: {err}");
+            send_err(&mut send, STATUS_BAD_REQUEST, format!("malformed header: {err}")).await;
+            return;
+        }
+    };
+
+    let jwt = match jwt_token_to_tunnel(&header.jwt) {
+        Ok(j) => j,
+        Err(err) => {
+            warn!("Invalid JWT in QUIC request from {client_addr}: {err}");
+            send_err(&mut send, STATUS_BAD_REQUEST, "invalid JWT").await;
+            return;
+        }
+    };
+
+    Span::current().record("id", &jwt.claims.id);
+    Span::current().record("remote", format!("{}:{}", jwt.claims.r, jwt.claims.rp));
+
+    let remote = match RemoteAddr::try_from(jwt.claims) {
+        Ok(r) => r,
+        Err(err) => {
+            warn!("Bad tunnel info in QUIC JWT from {client_addr}: {err}");
+            send_err(&mut send, STATUS_BAD_REQUEST, "bad tunnel info").await;
+            return;
+        }
+    };
+
+    // Authorization: prefer the dedicated field, fall back to a custom header named "authorization".
+    let authorization: Option<String> = header.authorization.clone().or_else(|| {
+        header
+            .headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case("authorization"))
+            .map(|(_, v)| v.clone())
+    });
+
+    let restriction = match validate_tunnel(&remote, &header.path_prefix, authorization.as_deref(), &restrictions) {
+        Some(r) => r.clone(),
+        None => {
+            warn!("Rejecting QUIC tunnel to {remote:?} from {client_addr}: no matching restriction");
+            send_err(&mut send, STATUS_FORBIDDEN, "forbidden by restrictions").await;
+            return;
+        }
+    };
+
+    info!("QUIC tunnel accepted due to matched restriction: {}", restriction.name);
+
+    let req_protocol = remote.protocol.clone();
+    let needs_cookie = req_protocol.is_dynamic_reverse_tunnel();
+
+    let tunnel = match server.exec_tunnel(&restriction, remote, client_addr).await {
+        Ok(t) => t,
+        Err(err) => {
+            warn!("Failed to exec QUIC tunnel for {client_addr}: {err}");
+            send_err(&mut send, STATUS_INTERNAL_ERROR, format!("tunnel setup failed: {err}")).await;
+            return;
+        }
+    };
+    let (remote_addr, local_rx, local_tx) = tunnel;
+
+    let cookie = if needs_cookie {
+        tunnel_to_jwt_token(Uuid::from_u128(0), &remote_addr)
+    } else {
+        String::new()
+    };
+    let response = QuicResponseHeader::ok(cookie);
+    if let Err(err) = response.write(&mut send).await {
+        warn!("Failed to write QUIC response header: {err}");
+        return;
+    }
+
+    info!("QUIC connected to {:?} {}:{}", req_protocol, remote_addr.host, remote_addr.port);
+
+    let ws_rx = QuicTunnelRead::new(recv);
+    let ws_tx = QuicTunnelWrite::new(send);
+
+    let (close_tx, close_rx) = oneshot::channel::<()>();
+    let executor = server.executor.clone();
+    let ping_frequency = server.config.websocket_ping_frequency;
+    executor.spawn(transport::io::propagate_remote_to_local(local_tx, ws_rx, close_rx).instrument(Span::current()));
+    let _ = transport::io::propagate_local_to_remote(local_rx, ws_tx, close_tx, ping_frequency).await;
+}
+
+/// Accept QUIC connections on the given endpoint and handle each bi-stream.
+///
+/// Polls `tls_reloader` (if any) before each accept so cert/key rotation propagates to the
+/// QUIC endpoint without dropping the listener.
+pub(super) async fn quic_server_serve<E: TokioExecutorRef>(
+    server: WsServer<E>,
+    endpoint: quinn::Endpoint,
+    tls_reloader: Arc<crate::tunnel::tls_reloader::TlsReloader>,
+    restrictions: Arc<ArcSwap<RestrictionsRules>>,
+) {
+    info!("QUIC server listening on {:?}", endpoint.local_addr());
+
+    loop {
+        // Reload TLS if the file watcher signaled a change.
+        if tls_reloader.should_reload_certificate_quic()
+            && let Some(tls_cfg) = server.config.tls.as_ref()
+        {
+            match build_quic_server_config(tls_cfg) {
+                Ok(new_cfg) => {
+                    endpoint.set_server_config(Some(new_cfg));
+                    info!("Reloaded QUIC server TLS configuration");
+                }
+                Err(err) => {
+                    error!("Failed to rebuild QUIC server config after cert reload: {err}");
+                }
+            }
+        }
+
+        let Some(incoming) = endpoint.accept().await else {
+            info!("QUIC endpoint closed, stopping accept loop");
+            break;
+        };
+
+        let server = server.clone();
+        let restrictions = restrictions.clone();
+
+        server.executor.clone().spawn(async move {
+            let connection = match incoming.await {
+                Ok(conn) => conn,
+                Err(err) => {
+                    error!("QUIC incoming connection failed: {err}");
+                    return;
+                }
+            };
+
+            let client_addr = connection.remote_address();
+            info!("QUIC connection established from {client_addr}");
+
+            // Accept multiplexed bi-directional streams from this connection.
+            loop {
+                let stream = match connection.accept_bi().await {
+                    Ok(stream) => stream,
+                    Err(quinn::ConnectionError::ApplicationClosed(_))
+                    | Err(quinn::ConnectionError::LocallyClosed)
+                    | Err(quinn::ConnectionError::ConnectionClosed(_)) => {
+                        info!("QUIC connection closed by client {client_addr}");
+                        break;
+                    }
+                    Err(err) => {
+                        warn!("QUIC accept_bi failed from {client_addr}: {err}");
+                        break;
+                    }
+                };
+
+                let (send, recv) = stream;
+                let server = server.clone();
+                let restrictions = restrictions.load().clone();
+
+                let request_id = Uuid::now_v7();
+                let span = mk_quic_span();
+                span.record("id", request_id.to_string());
+
+                server
+                    .executor
+                    .clone()
+                    .spawn(handle_quic_stream(server.clone(), restrictions, client_addr, send, recv).instrument(span));
+            }
+        });
+    }
+}

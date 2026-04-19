@@ -194,9 +194,10 @@ pub struct Client {
     pub http_headers_file: Option<PathBuf>,
 
     /// Address of the wstunnel server
-    /// You can either use websocket or http2 as transport protocol. Use websocket if you are unsure.
+    /// You can either use websocket, http2, or quic as transport protocol. Use websocket if you are unsure.
     /// Example: For websocket with TLS wss://wstunnel.example.com or without ws://wstunnel.example.com
     ///          For http2 with TLS https://wstunnel.example.com or without http://wstunnel.example.com
+    ///          For quic quic://wstunnel.example.com (always encrypted, requires --features quic)
     ///
     /// *WARNING* HTTP2 as transport protocol is harder to make it works because:
     ///   - If you are behind a (reverse) proxy/CDN they are going to buffer the whole request before forwarding it to the server
@@ -204,7 +205,7 @@ pub struct Client {
     ///   - if you have wstunnel behind a reverse proxy, most of them (i.e: nginx) are going to turn http2 request into http1
     ///     This is not going to work, because http1 does not support streaming naturally
     ///   - The only way to make it works with http2 is to have wstunnel directly exposed to the internet without any reverse proxy in front of it
-    #[cfg_attr(feature = "clap", arg(value_name = "ws[s]|http[s]://wstunnel.server.com[:port]", value_parser = parsers::parse_server_url, verbatim_doc_comment))]
+    #[cfg_attr(feature = "clap", arg(value_name = "ws[s]|http[s]|quic://wstunnel.server.com[:port]", value_parser = parsers::parse_server_url, verbatim_doc_comment))]
     pub remote_addr: Url,
 
     /// [Optional] Certificate (pem) to present to the server when connecting over TLS (HTTPS).
@@ -399,6 +400,14 @@ pub struct Server {
         verbatim_doc_comment,
     ))]
     pub remote_to_local_server_idle_timeout: Duration,
+
+    /// [Optional] Bind address for the QUIC transport listener.
+    /// When set, the server will also accept QUIC connections on this address.
+    /// Requires TLS configuration (certificate and key) and the `quic` feature.
+    /// Example: --quic-bind 0.0.0.0:8443
+    #[cfg(feature = "quic")]
+    #[cfg_attr(feature = "clap", arg(long, value_name = "BIND:PORT", verbatim_doc_comment))]
+    pub quic_bind: Option<SocketAddr>,
 }
 
 #[derive(Clone, Debug, PartialEq)]

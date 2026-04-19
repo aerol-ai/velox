@@ -1,4 +1,6 @@
 use crate::tunnel::transport::http2::{Http2TunnelRead, Http2TunnelWrite};
+#[cfg(feature = "quic")]
+use crate::tunnel::transport::quic::{QuicTunnelRead, QuicTunnelWrite};
 use crate::tunnel::transport::websocket::{WebsocketTunnelRead, WebsocketTunnelWrite};
 use bytes::{BufMut, BytesMut};
 use futures_util::{FutureExt, pin_mut};
@@ -35,6 +37,8 @@ pub trait TunnelRead: Send + 'static {
 pub enum TunnelReader {
     Websocket(WebsocketTunnelRead),
     Http2(Http2TunnelRead),
+    #[cfg(feature = "quic")]
+    Quic(QuicTunnelRead),
 }
 
 impl TunnelRead for TunnelReader {
@@ -42,6 +46,8 @@ impl TunnelRead for TunnelReader {
         match self {
             Self::Websocket(s) => s.copy(writer).await,
             Self::Http2(s) => s.copy(writer).await,
+            #[cfg(feature = "quic")]
+            Self::Quic(s) => s.copy(writer).await,
         }
     }
 }
@@ -49,6 +55,8 @@ impl TunnelRead for TunnelReader {
 pub enum TunnelWriter {
     Websocket(WebsocketTunnelWrite),
     Http2(Http2TunnelWrite),
+    #[cfg(feature = "quic")]
+    Quic(QuicTunnelWrite),
 }
 
 impl TunnelWrite for TunnelWriter {
@@ -56,6 +64,8 @@ impl TunnelWrite for TunnelWriter {
         match self {
             Self::Websocket(s) => s.buf_mut(),
             Self::Http2(s) => s.buf_mut(),
+            #[cfg(feature = "quic")]
+            Self::Quic(s) => s.buf_mut(),
         }
     }
 
@@ -63,6 +73,8 @@ impl TunnelWrite for TunnelWriter {
         match self {
             Self::Websocket(s) => s.write().await,
             Self::Http2(s) => s.write().await,
+            #[cfg(feature = "quic")]
+            Self::Quic(s) => s.write().await,
         }
     }
 
@@ -70,6 +82,8 @@ impl TunnelWrite for TunnelWriter {
         match self {
             Self::Websocket(s) => s.ping().await,
             Self::Http2(s) => s.ping().await,
+            #[cfg(feature = "quic")]
+            Self::Quic(s) => s.ping().await,
         }
     }
 
@@ -77,6 +91,8 @@ impl TunnelWrite for TunnelWriter {
         match self {
             Self::Websocket(s) => s.close().await,
             Self::Http2(s) => s.close().await,
+            #[cfg(feature = "quic")]
+            Self::Quic(s) => s.close().await,
         }
     }
 
@@ -84,6 +100,8 @@ impl TunnelWrite for TunnelWriter {
         match self {
             Self::Websocket(s) => s.pending_operations_notify(),
             Self::Http2(s) => s.pending_operations_notify(),
+            #[cfg(feature = "quic")]
+            Self::Quic(s) => s.pending_operations_notify(),
         }
     }
 
@@ -91,6 +109,8 @@ impl TunnelWrite for TunnelWriter {
         match self {
             Self::Websocket(s) => s.handle_pending_operations().await,
             Self::Http2(s) => s.handle_pending_operations().await,
+            #[cfg(feature = "quic")]
+            Self::Quic(s) => s.handle_pending_operations().await,
         }
     }
 }

@@ -64,6 +64,8 @@ pub struct WsServerConfig {
     pub restriction_config: Option<PathBuf>,
     pub http_proxy: Option<Url>,
     pub remote_server_idle_timeout: Duration,
+    #[cfg(feature = "quic")]
+    pub quic_bind: Option<SocketAddr>,
 }
 
 #[derive(Clone)]
@@ -149,7 +151,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         Ok((remote_addr, local_rx, local_tx, inject_cookie))
     }
 
-    async fn exec_tunnel(
+    pub(super) async fn exec_tunnel(
         &self,
         restriction: &RestrictionConfig,
         remote: RemoteAddr,
@@ -315,6 +317,24 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         }
     }
 
+    #[cfg(feature = "quic")]
+    fn create_quic_endpoint(
+        config: &WsServerConfig,
+        quic_bind: SocketAddr,
+    ) -> anyhow::Result<quinn::Endpoint> {
+        use crate::tunnel::server::handler_quic::build_quic_server_config;
+        let tls_config = config
+            .tls
+            .as_ref()
+            .ok_or_else(|| anyhow!("QUIC transport requires TLS configuration on the server"))?;
+
+        let server_config = build_quic_server_config(tls_config)?;
+        let endpoint = quinn::Endpoint::server(server_config, quic_bind)
+            .with_context(|| format!("Failed to bind QUIC endpoint on {quic_bind}"))?;
+        info!("QUIC endpoint bound on {quic_bind}");
+        Ok(endpoint)
+    }
+
     pub async fn serve(self, restrictions: RestrictionsRules) -> anyhow::Result<()> {
         info!("Starting wstunnel server listening on {}", self.config.bind);
 
@@ -388,14 +408,16 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
             }
         };
 
-        // Init TLS if needed
+        // Init TLS if needed. The reloader is built once and shared (as Arc) between the TCP
+        // accept loop and the QUIC accept loop so both consumers see every cert-change event.
+        let tls_reloader = Arc::new(TlsReloader::new_for_server(self.config.clone())?);
         let mut tls_context = if let Some(tls_config) = &self.config.tls {
             let tls_context = TlsContext {
                 tls_acceptor: Arc::new(tls::tls_acceptor(
                     tls_config,
                     Some(vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
                 )?),
-                tls_reloader: TlsReloader::new_for_server(self.config.clone())?,
+                tls_reloader: tls_reloader.clone(),
                 tls_config,
             };
             Some(tls_context)
@@ -408,6 +430,24 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         let listener = TcpListener::bind(&self.config.bind)
             .await
             .with_context(|| format!("Failed to bind to socket on {}", self.config.bind))?;
+
+        // Spawn QUIC listener if configured
+        #[cfg(feature = "quic")]
+        {
+            if let Some(quic_bind) = self.config.quic_bind {
+                use crate::tunnel::server::handler_quic;
+                let quic_endpoint = Self::create_quic_endpoint(&self.config, quic_bind)?;
+                let quic_server = self.clone();
+                let quic_restrictions = restrictions.restrictions_rules().clone();
+                let quic_reloader = tls_reloader.clone();
+                self.executor.spawn(handler_quic::quic_server_serve(
+                    quic_server,
+                    quic_endpoint,
+                    quic_reloader,
+                    quic_restrictions,
+                ));
+            }
+        }
 
         loop {
             let (stream, peer_addr) = match listener.accept().await {
@@ -524,8 +564,8 @@ fn mk_span() -> Span {
 
 impl Debug for WsServerConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("WsServerConfig")
-            .field("socket_so_mark", &self.socket_so_mark)
+        let mut d = f.debug_struct("WsServerConfig");
+        d.field("socket_so_mark", &self.socket_so_mark)
             .field("bind", &self.bind)
             .field("websocket_ping_frequency", &self.websocket_ping_frequency)
             .field("timeout_connect", &self.timeout_connect)
@@ -540,14 +580,16 @@ impl Debug for WsServerConfig {
                     .as_ref()
                     .map(|x| x.tls_client_ca_certificates.is_some())
                     .unwrap_or(false),
-            )
-            .finish()
+            );
+        #[cfg(feature = "quic")]
+        d.field("quic_bind", &self.quic_bind);
+        d.finish()
     }
 }
 
 struct TlsContext<'a> {
     tls_acceptor: Arc<TlsAcceptor>,
-    tls_reloader: TlsReloader,
+    tls_reloader: Arc<TlsReloader>,
     tls_config: &'a TlsServerConfig,
 }
 impl TlsContext<'_> {

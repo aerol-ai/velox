@@ -29,7 +29,7 @@ use crate::tunnel::LocalProtocol;
 use crate::tunnel::RemoteAddr;
 use crate::tunnel::client::WsClient;
 use crate::tunnel::transport::jwt::tunnel_to_jwt_token;
-use anyhow::{Context, anyhow};
+use anyhow::{Context, anyhow, ensure};
 use bytes::{BufMut, Bytes, BytesMut};
 use futures_util::FutureExt;
 use hyper::header::{COOKIE, HeaderValue};
@@ -65,10 +65,6 @@ pub const STATUS_BAD_REQUEST: u8 = 1;
 pub const STATUS_FORBIDDEN: u8 = 2;
 pub const STATUS_INTERNAL_ERROR: u8 = 3;
 
-const QUIC_KEEP_ALIVE: Duration = Duration::from_secs(15);
-const QUIC_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
-const QUIC_MAX_BIDI_STREAMS: u32 = 1024;
-const QUIC_DATAGRAM_BUFFER_SIZE: usize = 1024 * 1024;
 const QUIC_DATAGRAM_CHANNEL_SIZE: usize = 64;
 const QUIC_DATAGRAM_FLOW_PREFIX_LEN: usize = 4;
 pub const QUIC_ALPN: &[u8] = b"wstunnel";
@@ -579,16 +575,25 @@ pub struct QuicClientState {
     pub(crate) datagram_hub: Arc<QuicDatagramHub>,
 }
 
-/// Build a `quinn::TransportConfig` with sensible defaults for tunnel workloads.
-pub fn build_transport_config() -> anyhow::Result<Arc<quinn::TransportConfig>> {
+/// Build a `quinn::TransportConfig` from the explicit wstunnel QUIC settings.
+pub fn build_transport_config(
+    keep_alive_interval: Option<Duration>,
+    max_idle_timeout: Option<Duration>,
+    max_concurrent_bidi_streams: u32,
+    datagram_buffer_size: usize,
+) -> anyhow::Result<Arc<quinn::TransportConfig>> {
+    ensure!(max_concurrent_bidi_streams > 0, "QUIC max streams must be greater than zero");
+    ensure!(datagram_buffer_size > 0, "QUIC datagram buffer size must be greater than zero");
+
     let mut transport = quinn::TransportConfig::default();
-    transport.keep_alive_interval(Some(QUIC_KEEP_ALIVE));
-    transport.max_idle_timeout(Some(
-        quinn::IdleTimeout::try_from(QUIC_IDLE_TIMEOUT).map_err(|e| anyhow!("invalid idle timeout: {e}"))?,
-    ));
-    transport.max_concurrent_bidi_streams(QUIC_MAX_BIDI_STREAMS.into());
-    transport.datagram_receive_buffer_size(Some(QUIC_DATAGRAM_BUFFER_SIZE));
-    transport.datagram_send_buffer_size(QUIC_DATAGRAM_BUFFER_SIZE);
+    transport.keep_alive_interval(keep_alive_interval);
+    transport.max_idle_timeout(match max_idle_timeout {
+        Some(timeout) => Some(quinn::IdleTimeout::try_from(timeout).map_err(|e| anyhow!("invalid idle timeout: {e}"))?),
+        None => None,
+    });
+    transport.max_concurrent_bidi_streams(max_concurrent_bidi_streams.into());
+    transport.datagram_receive_buffer_size(Some(datagram_buffer_size));
+    transport.datagram_send_buffer_size(datagram_buffer_size);
     Ok(Arc::new(transport))
 }
 
@@ -601,12 +606,18 @@ fn build_quinn_client_config(client: &WsClient<impl crate::TokioExecutorRef>) ->
 
     let mut rustls_config = (**tls_cfg.tls_connector().config()).clone();
     rustls_config.alpn_protocols = vec![QUIC_ALPN.to_vec()];
+    rustls_config.enable_early_data = client.config.quic_0rtt;
 
     let quinn_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(rustls_config)
         .map_err(|e| anyhow!("Failed to build QUIC client crypto: {e}"))?;
 
     let mut quinn_config = quinn::ClientConfig::new(Arc::new(quinn_crypto));
-    quinn_config.transport_config(build_transport_config()?);
+    quinn_config.transport_config(build_transport_config(
+        client.config.quic_keep_alive,
+        client.config.quic_max_idle_timeout,
+        client.config.quic_max_streams,
+        client.config.quic_datagram_buffer_size,
+    )?);
     Ok(quinn_config)
 }
 
@@ -657,11 +668,34 @@ async fn establish_new_connection(client: &WsClient<impl crate::TokioExecutorRef
     let sni = sni_for(client, &host_str);
 
     info!("Opening QUIC connection to {server_addr} (SNI: {sni})");
-    let connection = endpoint
+    let connecting = endpoint
         .connect(server_addr, &sni)
-        .with_context(|| format!("failed to start QUIC connection to {server_addr}"))?
-        .await
-        .with_context(|| format!("QUIC handshake failed with {server_addr}"))?;
+        .with_context(|| format!("failed to start QUIC connection to {server_addr}"))?;
+    let connection = if client.config.quic_0rtt {
+        match connecting.into_0rtt() {
+            Ok((connection, accepted)) => {
+                info!("Attempting QUIC 0-RTT with {server_addr}");
+                client.executor.clone().spawn(async move {
+                    if accepted.await {
+                        info!("QUIC 0-RTT accepted by {server_addr}");
+                    } else {
+                        info!("QUIC 0-RTT rejected by {server_addr}");
+                    }
+                });
+                connection
+            }
+            Err(connecting) => {
+                debug!("QUIC 0-RTT not available yet for {server_addr}, continuing with 1-RTT");
+                connecting
+                    .await
+                    .with_context(|| format!("QUIC handshake failed with {server_addr}"))?
+            }
+        }
+    } else {
+        connecting
+            .await
+            .with_context(|| format!("QUIC handshake failed with {server_addr}"))?
+    };
     let datagram_hub = QuicDatagramHub::new(connection.clone());
     client.executor.clone().spawn(datagram_hub.clone().run());
     info!("QUIC connection established with {server_addr}");
@@ -702,11 +736,31 @@ async fn invalidate_connection(client: &WsClient<impl crate::TokioExecutorRef>) 
     *guard = None;
 }
 
+fn is_zero_rtt_rejected(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| cause.to_string().contains("0-RTT rejected"))
+}
+
 // ============================================================================
 // Client: public connect entrypoint
 // ============================================================================
 
 pub async fn connect(
+    request_id: Uuid,
+    client: &WsClient<impl crate::TokioExecutorRef>,
+    dest_addr: &RemoteAddr,
+) -> anyhow::Result<(QuicTunnelRead, QuicTunnelWrite, Parts)> {
+    match connect_once(request_id, client, dest_addr).await {
+        Ok(result) => Ok(result),
+        Err(err) if client.config.quic_0rtt && is_zero_rtt_rejected(&err) => {
+            info!("Retrying QUIC tunnel after 0-RTT rejection");
+            invalidate_connection(client).await;
+            connect_once(request_id, client, dest_addr).await
+        }
+        Err(err) => Err(err),
+    }
+}
+
+async fn connect_once(
     request_id: Uuid,
     client: &WsClient<impl crate::TokioExecutorRef>,
     dest_addr: &RemoteAddr,

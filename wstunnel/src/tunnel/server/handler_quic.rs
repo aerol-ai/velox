@@ -32,15 +32,29 @@ fn mk_quic_span() -> Span {
 /// Build a `quinn::ServerConfig` from the current TLS state. Called both on initial bind
 /// and on every cert reload.
 pub(super) fn build_quic_server_config(
-    tls_config: &crate::tunnel::server::TlsServerConfig,
+    server: &crate::tunnel::server::WsServerConfig,
 ) -> anyhow::Result<quinn::ServerConfig> {
+    let tls_config = server
+        .tls
+        .as_ref()
+        .ok_or_else(|| anyhow!("QUIC transport requires TLS configuration on the server"))?;
     let server_crypto = tls::build_server_config(tls_config, Some(vec![QUIC_ALPN.to_vec()]))?;
+    let mut server_crypto = server_crypto;
+    if server.quic_0rtt {
+        server_crypto.max_early_data_size = u32::MAX;
+    }
 
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(
         quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)
             .map_err(|e| anyhow!("Failed to create QUIC server crypto: {e}"))?,
     ));
-    server_config.transport_config(crate::tunnel::transport::quic::build_transport_config()?);
+    server_config.transport_config(crate::tunnel::transport::quic::build_transport_config(
+        server.quic_keep_alive,
+        server.quic_max_idle_timeout,
+        server.quic_max_streams,
+        server.quic_datagram_buffer_size,
+    )?);
+    server_config.migration(!server.quic_disable_migration);
     Ok(server_config)
 }
 
@@ -222,10 +236,8 @@ pub(super) async fn quic_server_serve<E: TokioExecutorRef>(
 
     loop {
         // Reload TLS if the file watcher signaled a change.
-        if tls_reloader.should_reload_certificate_quic()
-            && let Some(tls_cfg) = server.config.tls.as_ref()
-        {
-            match build_quic_server_config(tls_cfg) {
+        if tls_reloader.should_reload_certificate_quic() && server.config.tls.is_some() {
+            match build_quic_server_config(server.config.as_ref()) {
                 Ok(new_cfg) => {
                     endpoint.set_server_config(Some(new_cfg));
                     info!("Reloaded QUIC server TLS configuration");

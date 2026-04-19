@@ -66,6 +66,18 @@ pub struct WsServerConfig {
     pub remote_server_idle_timeout: Duration,
     #[cfg(feature = "quic")]
     pub quic_bind: Option<SocketAddr>,
+    #[cfg(feature = "quic")]
+    pub quic_0rtt: bool,
+    #[cfg(feature = "quic")]
+    pub quic_keep_alive: Option<Duration>,
+    #[cfg(feature = "quic")]
+    pub quic_max_idle_timeout: Option<Duration>,
+    #[cfg(feature = "quic")]
+    pub quic_max_streams: u32,
+    #[cfg(feature = "quic")]
+    pub quic_datagram_buffer_size: usize,
+    #[cfg(feature = "quic")]
+    pub quic_disable_migration: bool,
 }
 
 #[derive(Clone)]
@@ -320,12 +332,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
     #[cfg(feature = "quic")]
     fn create_quic_endpoint(config: &WsServerConfig, quic_bind: SocketAddr) -> anyhow::Result<quinn::Endpoint> {
         use crate::tunnel::server::handler_quic::build_quic_server_config;
-        let tls_config = config
-            .tls
-            .as_ref()
-            .ok_or_else(|| anyhow!("QUIC transport requires TLS configuration on the server"))?;
-
-        let server_config = build_quic_server_config(tls_config)?;
+        let server_config = build_quic_server_config(config)?;
         let endpoint = quinn::Endpoint::server(server_config, quic_bind)
             .with_context(|| format!("Failed to bind QUIC endpoint on {quic_bind}"))?;
         info!("QUIC endpoint bound on {quic_bind}");
@@ -579,7 +586,13 @@ impl Debug for WsServerConfig {
                     .unwrap_or(false),
             );
         #[cfg(feature = "quic")]
-        d.field("quic_bind", &self.quic_bind);
+        d.field("quic_bind", &self.quic_bind)
+            .field("quic_0rtt", &self.quic_0rtt)
+            .field("quic_keep_alive", &self.quic_keep_alive)
+            .field("quic_max_idle_timeout", &self.quic_max_idle_timeout)
+            .field("quic_max_streams", &self.quic_max_streams)
+            .field("quic_datagram_buffer_size", &self.quic_datagram_buffer_size)
+            .field("quic_disable_migration", &self.quic_disable_migration);
         d.finish()
     }
 }

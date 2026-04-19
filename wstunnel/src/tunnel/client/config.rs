@@ -26,6 +26,16 @@ pub struct WsClientConfig {
     pub websocket_mask_frame: bool,
     pub http_proxy: Option<Url>,
     pub dns_resolver: DnsResolver,
+    #[cfg(feature = "quic")]
+    pub quic_0rtt: bool,
+    #[cfg(feature = "quic")]
+    pub quic_keep_alive: Option<Duration>,
+    #[cfg(feature = "quic")]
+    pub quic_max_idle_timeout: Option<Duration>,
+    #[cfg(feature = "quic")]
+    pub quic_max_streams: u32,
+    #[cfg(feature = "quic")]
+    pub quic_datagram_buffer_size: usize,
 }
 
 impl WsClientConfig {

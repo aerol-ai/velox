@@ -208,6 +208,53 @@ pub struct Client {
     #[cfg_attr(feature = "clap", arg(value_name = "ws[s]|http[s]|quic://wstunnel.server.com[:port]", value_parser = parsers::parse_server_url, verbatim_doc_comment))]
     pub remote_addr: Url,
 
+    /// [Optional] Enable QUIC 0-RTT on resumed sessions.
+    /// This only takes effect after the first successful QUIC connection has cached resumption state.
+    /// Warning: 0-RTT data can be replayed. Enable it only if replaying a tunnel-open request is acceptable for your deployment.
+    #[cfg(feature = "quic")]
+    #[cfg_attr(feature = "clap", arg(long, default_value = "false", verbatim_doc_comment))]
+    pub quic_0rtt: bool,
+
+    /// QUIC keep alive interval.
+    /// Set to zero to disable.
+    #[cfg(feature = "quic")]
+    #[cfg_attr(feature = "clap", arg(
+        long,
+        value_name = "DURATION(s|m|h)",
+        default_value = "15s",
+        value_parser = parsers::parse_duration_sec,
+        verbatim_doc_comment
+    ))]
+    pub quic_keep_alive: Option<Duration>,
+
+    /// QUIC maximum idle timeout.
+    /// Set to zero to disable.
+    #[cfg(feature = "quic")]
+    #[cfg_attr(feature = "clap", arg(
+        long,
+        value_name = "DURATION(s|m|h)",
+        default_value = "60s",
+        value_parser = parsers::parse_duration_sec,
+        verbatim_doc_comment
+    ))]
+    pub quic_max_idle_timeout: Option<Duration>,
+
+    /// Maximum number of concurrent QUIC bi-directional streams per connection.
+    #[cfg(feature = "quic")]
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, value_name = "INT", default_value = "1024", verbatim_doc_comment)
+    )]
+    pub quic_max_streams: u32,
+
+    /// QUIC DATAGRAM send/receive buffer size in bytes.
+    #[cfg(feature = "quic")]
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, value_name = "BYTES", default_value = "1048576", verbatim_doc_comment)
+    )]
+    pub quic_datagram_buffer_size: usize,
+
     /// [Optional] Certificate (pem) to present to the server when connecting over TLS (HTTPS).
     /// Used when the server requires clients to authenticate themselves with a certificate (i.e. mTLS).
     /// Unless overridden, the HTTP upgrade path will be configured to be the common name (CN) of the certificate.
@@ -408,6 +455,58 @@ pub struct Server {
     #[cfg(feature = "quic")]
     #[cfg_attr(feature = "clap", arg(long, value_name = "BIND:PORT", verbatim_doc_comment))]
     pub quic_bind: Option<SocketAddr>,
+
+    /// [Optional] Accept QUIC 0-RTT on resumed sessions.
+    /// Warning: 0-RTT data can be replayed. Enable it only if replaying an incoming tunnel-open request is acceptable for your deployment.
+    #[cfg(feature = "quic")]
+    #[cfg_attr(feature = "clap", arg(long, default_value = "false", verbatim_doc_comment))]
+    pub quic_0rtt: bool,
+
+    /// QUIC keep alive interval.
+    /// Set to zero to disable.
+    #[cfg(feature = "quic")]
+    #[cfg_attr(feature = "clap", arg(
+        long,
+        value_name = "DURATION(s|m|h)",
+        default_value = "15s",
+        value_parser = parsers::parse_duration_sec,
+        verbatim_doc_comment
+    ))]
+    pub quic_keep_alive: Option<Duration>,
+
+    /// QUIC maximum idle timeout.
+    /// Set to zero to disable.
+    #[cfg(feature = "quic")]
+    #[cfg_attr(feature = "clap", arg(
+        long,
+        value_name = "DURATION(s|m|h)",
+        default_value = "60s",
+        value_parser = parsers::parse_duration_sec,
+        verbatim_doc_comment
+    ))]
+    pub quic_max_idle_timeout: Option<Duration>,
+
+    /// Maximum number of concurrent QUIC bi-directional streams per connection.
+    #[cfg(feature = "quic")]
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, value_name = "INT", default_value = "1024", verbatim_doc_comment)
+    )]
+    pub quic_max_streams: u32,
+
+    /// QUIC DATAGRAM send/receive buffer size in bytes.
+    #[cfg(feature = "quic")]
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, value_name = "BYTES", default_value = "1048576", verbatim_doc_comment)
+    )]
+    pub quic_datagram_buffer_size: usize,
+
+    /// Disable QUIC connection migration.
+    /// Useful as an escape hatch if middleboxes on your path break migrated flows.
+    #[cfg(feature = "quic")]
+    #[cfg_attr(feature = "clap", arg(long, default_value = "false", verbatim_doc_comment))]
+    pub quic_disable_migration: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]

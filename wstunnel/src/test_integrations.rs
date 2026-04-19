@@ -69,6 +69,18 @@ fn server_no_tls(dns_resolver: DnsResolver) -> WsServer {
         remote_server_idle_timeout: Duration::from_secs(30),
         #[cfg(feature = "quic")]
         quic_bind: None,
+        #[cfg(feature = "quic")]
+        quic_0rtt: false,
+        #[cfg(feature = "quic")]
+        quic_keep_alive: Some(Duration::from_secs(15)),
+        #[cfg(feature = "quic")]
+        quic_max_idle_timeout: Some(Duration::from_secs(60)),
+        #[cfg(feature = "quic")]
+        quic_max_streams: 1024,
+        #[cfg(feature = "quic")]
+        quic_datagram_buffer_size: 1024 * 1024,
+        #[cfg(feature = "quic")]
+        quic_disable_migration: false,
     };
     WsServer::new(server_config, DefaultTokioExecutor::default())
 }
@@ -89,6 +101,16 @@ async fn client_ws(dns_resolver: DnsResolver) -> WsClient {
         websocket_mask_frame: false,
         dns_resolver,
         http_proxy: None,
+        #[cfg(feature = "quic")]
+        quic_0rtt: false,
+        #[cfg(feature = "quic")]
+        quic_keep_alive: Some(Duration::from_secs(15)),
+        #[cfg(feature = "quic")]
+        quic_max_idle_timeout: Some(Duration::from_secs(60)),
+        #[cfg(feature = "quic")]
+        quic_max_streams: 1024,
+        #[cfg(feature = "quic")]
+        quic_datagram_buffer_size: 1024 * 1024,
     };
 
     WsClient::new(
@@ -165,6 +187,12 @@ fn server_quic(dns_resolver: DnsResolver, tls: TlsServerConfig) -> WsServer {
         http_proxy: None,
         remote_server_idle_timeout: Duration::from_secs(30),
         quic_bind: Some(QUIC_SERVER_UDP_BIND),
+        quic_0rtt: false,
+        quic_keep_alive: Some(Duration::from_secs(15)),
+        quic_max_idle_timeout: Some(Duration::from_secs(60)),
+        quic_max_streams: 1024,
+        quic_datagram_buffer_size: 1024 * 1024,
+        quic_disable_migration: false,
     };
     WsServer::new(server_config, DefaultTokioExecutor::default())
 }
@@ -226,6 +254,11 @@ async fn client_quic(
         websocket_mask_frame: false,
         dns_resolver,
         http_proxy: None,
+        quic_0rtt: false,
+        quic_keep_alive: Some(Duration::from_secs(15)),
+        quic_max_idle_timeout: Some(Duration::from_secs(60)),
+        quic_max_streams: 1024,
+        quic_datagram_buffer_size: 1024 * 1024,
     };
 
     WsClient::new(

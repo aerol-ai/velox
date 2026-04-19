@@ -187,6 +187,16 @@ pub async fn create_client(
         websocket_mask_frame: args.websocket_mask_frame,
         dns_resolver,
         http_proxy,
+        #[cfg(feature = "quic")]
+        quic_0rtt: args.quic_0rtt,
+        #[cfg(feature = "quic")]
+        quic_keep_alive: args.quic_keep_alive.filter(|d| !d.is_zero()),
+        #[cfg(feature = "quic")]
+        quic_max_idle_timeout: args.quic_max_idle_timeout.filter(|d| !d.is_zero()),
+        #[cfg(feature = "quic")]
+        quic_max_streams: args.quic_max_streams,
+        #[cfg(feature = "quic")]
+        quic_datagram_buffer_size: args.quic_datagram_buffer_size,
     };
 
     let client = WsClient::new(
@@ -556,6 +566,18 @@ async fn run_server_impl(args: Server, executor: impl TokioExecutorRef) -> anyho
         remote_server_idle_timeout: args.remote_to_local_server_idle_timeout,
         #[cfg(feature = "quic")]
         quic_bind: args.quic_bind,
+        #[cfg(feature = "quic")]
+        quic_0rtt: args.quic_0rtt,
+        #[cfg(feature = "quic")]
+        quic_keep_alive: args.quic_keep_alive.filter(|d| !d.is_zero()),
+        #[cfg(feature = "quic")]
+        quic_max_idle_timeout: args.quic_max_idle_timeout.filter(|d| !d.is_zero()),
+        #[cfg(feature = "quic")]
+        quic_max_streams: args.quic_max_streams,
+        #[cfg(feature = "quic")]
+        quic_datagram_buffer_size: args.quic_datagram_buffer_size,
+        #[cfg(feature = "quic")]
+        quic_disable_migration: args.quic_disable_migration,
     };
     let server = WsServer::new(server_config, executor);
 

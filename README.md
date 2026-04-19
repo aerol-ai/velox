@@ -7,12 +7,38 @@
   <br/>
 </p>
 
+[![CI — Tests](https://github.com/aerol-ai/velox/actions/workflows/ci.yaml/badge.svg)](https://github.com/aerol-ai/velox/actions/workflows/ci.yaml)
+[![Docker & Helm Package](https://github.com/aerol-ai/velox/actions/workflows/docker-helm.yaml/badge.svg)](https://github.com/aerol-ai/velox/actions/workflows/docker-helm.yaml)
+
+<!-- CI_TEST_RESULTS_START -->
+| Metric | Value |
+|--------|-------|
+| Status | ✅ passing |
+| Passed | — |
+| Failed | 0 |
+| Ignored | — |
+| Branch | `main` |
+| Last run | — |
+<!-- CI_TEST_RESULTS_END -->
+
+---
+
+## Quick setup
+
+> **New here?** See the focused setup guides in [`setup/`](setup/):
+>
+> * [Docker Compose + Caddy (auto-TLS)](setup/docker-compose-setup.md) — deploy on any Linux VM in 5 minutes
+> * [Kubernetes / Helm](setup/helm-setup.md) — production-grade cluster deployment
+
+---
+
 ## Summary
 
 * [Description](#description)
 * [Demo server](#demo)
 * [Command line](#cmd)
 * [Examples](#examples)
+* [QUIC transport](#quic)
 * [Release](#release)
 * [Note](#note)
 * [Benchmark](#bench)
@@ -41,7 +67,7 @@ nodejs to use this tool, I remade it in ~~Haskell~~ Rust and improved it.
 * Support for tls/https server with certificates auto-reload (with embedded self-signed certificate, or your own)
 * Support of mTLS with certificates auto-reload - [documentation here](https://github.com/aerol-ai/velox/blob/main/docs/using_mtls.md)
 * Support IPv6
-* Support for Websocket and HTTP2 as transport protocol (websocket is more performant)
+* **Three transport protocols**: WebSocket (default), HTTP/2, and **QUIC** (UDP-based, lowest latency)
 * **Standalone binaries** (so just cp it where you want) [here](https://github.com/aerol-ai/velox/releases)
 
 ## Sponsors <a name="sponsors"></a>
@@ -374,6 +400,7 @@ docker pull ghcr.io/aerol-ai/velox:latest
 * [Reverse tunneling](#reverse)
 * [How to secure access of your velox server](#secure)
 * [Use HTTP2 instead of websocket for transport protocol](#http2)
+* [**Use QUIC for lowest-latency tunnels**](#quic)
 * [Maximize your stealthiness/Make your traffic discrete](#stealth)
 
 ### Understand command line syntax <a name="syntax"></a>
@@ -663,6 +690,128 @@ application/octet-stream
     * To avoid having the same url than every other velox user
 * Change your tls-sni-override to a domain is known to be allowed (i.e: google.com, baidu.com, etc...)
     * this will not work if your velox server is behind a reverse proxy (i.e: Nginx, Cloudflare, HAProxy, ...)
+
+---
+
+## QUIC transport <a name="quic"></a>
+
+QUIC is a UDP-based transport protocol developed by Google/IETF. Velox supports QUIC as a **first-class transport**
+alongside WebSocket and HTTP/2. It gives you:
+
+| Property | WebSocket | HTTP/2 | QUIC |
+|----------|-----------|--------|------|
+| Protocol | TCP | TCP | **UDP** |
+| TLS required | optional | optional | **always** |
+| Head-of-line blocking | yes | yes | **no** |
+| Connection establishment | TCP + TLS | TCP + TLS | **1-RTT** (0-RTT on resume) |
+| Multiplexed streams | no (1 per conn) | yes | **yes** |
+| UDP tunnel mode | over stream | over stream | **native DATAGRAM frames** |
+| Reverse-proxy friendly | yes | partial | no (direct UDP) |
+
+### How QUIC is implemented in velox
+
+```
+Client (velox CLI)
+      │
+      │  QUIC / UDP  (TLS always on, ALPN=velox)
+      ▼
+velox server  ── --quic-bind 0.0.0.0:8443
+      │
+      │  Each tunnel = one QUIC bi-directional stream
+      │  UDP tunnels use QUIC DATAGRAM frames (no stream)
+      ▼
+Destination host:port
+```
+
+* **TCP tunnels** → one QUIC bi-directional stream per tunnel. Fully independent;
+  a slow tunnel cannot block others (no head-of-line blocking).
+* **UDP tunnels** → QUIC DATAGRAM frames. The first bytes of the stream register a
+  `flow_id` in the `QuicDatagramHub`; subsequent UDP packets travel outside the
+  stream for minimum latency. Perfect for WireGuard, DNS, and other UDP workloads.
+* **Single connection, unlimited streams** — unlike WebSocket (one connection per
+  tunnel) QUIC reuses one UDP connection for all concurrent tunnels.
+* **TLS is always on** — there is no cleartext QUIC. Velox uses the embedded
+  self-signed certificate by default; pass `--tls-certificate` for a real cert.
+* **Wire preamble** — `"VELOX/1\n"` (8 bytes) followed by length-prefixed fields
+  (path prefix, JWT, authorization headers, transport mode, flow ID). This
+  makes the protocol look like normal QUIC application traffic to middleboxes.
+
+### Prerequisites
+
+The `quic` feature must be compiled in. The official Docker image (`ghcr.io/aerol-ai/velox`) is built with QUIC enabled.
+For a manual build:
+
+```bash
+cargo build --features quic --package velox-cli --release
+```
+
+### Server side
+
+The QUIC listener runs on a **separate UDP port** from the WebSocket/HTTP2 TCP port.
+Pass `--quic-bind` to enable it:
+
+```bash
+# WebSocket on TCP 8080 + QUIC on UDP 8443
+velox server wss://[::]:8080 --quic-bind 0.0.0.0:8443
+```
+
+Both listeners serve the same tunnels; clients choose which transport to use.
+
+> **Firewall**: open UDP port 8443 in addition to TCP 443/8080.
+
+### Client side
+
+Use the `quic://` URL scheme:
+
+```bash
+# SOCKS5 proxy via QUIC
+velox client -L socks5://127.0.0.1:1080 quic://myserver.example.com:8443
+
+# Forward a TCP port via QUIC
+velox client -L tcp://5432:db.internal:5432 quic://myserver.example.com:8443
+
+# WireGuard over QUIC DATAGRAM frames (zero idle timeout)
+velox client -L 'udp://51820:localhost:51820?timeout_sec=0' quic://myserver.example.com:8443
+```
+
+### QUIC flags reference
+
+**Server:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--quic-bind ADDR:PORT` | — | UDP address to bind the QUIC listener (required to enable QUIC) |
+| `--quic-0rtt` | false | Accept 0-RTT on resumed sessions (replay risk) |
+| `--quic-keep-alive` | 15s | Keep-alive interval (0 = off) |
+| `--quic-max-idle-timeout` | 60s | Max idle timeout (0 = off) |
+| `--quic-max-streams` | 1024 | Max concurrent bi-directional streams |
+| `--quic-datagram-buffer-size` | 1 MiB | DATAGRAM send/receive buffer |
+| `--quic-disable-migration` | false | Disable QUIC connection migration |
+
+**Client:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--quic-0rtt` | false | Send 0-RTT data on resumed sessions (replay risk) |
+| `--quic-keep-alive` | 15s | Keep-alive interval |
+| `--quic-max-idle-timeout` | 60s | Max idle timeout |
+| `--quic-max-streams` | 1024 | Max concurrent streams |
+| `--quic-datagram-buffer-size` | 1 MiB | DATAGRAM buffer size |
+
+### QUIC vs WebSocket — when to choose which
+
+* **Use QUIC** when you control the network path end-to-end (no corporate proxy between you and the server),
+  you want lowest latency, or you are tunnelling UDP (e.g. WireGuard, gaming, DNS).
+* **Use WebSocket** when you are behind an HTTP proxy / CDN / firewall that only allows TCP 443.
+  WebSocket over TLS looks identical to HTTPS traffic.
+* **Use HTTP/2** only if WebSocket is explicitly blocked and you control the entire path (no buffering proxy).
+
+> **QUIC requires TLS.** There is no cleartext QUIC mode. Velox uses its embedded self-signed certificate
+> by default — supply `--tls-certificate` and `--tls-private-key` for production use.
+
+> **QUIC does NOT work through Caddy/nginx.** The QUIC UDP port must be exposed directly to the internet.
+> See the [Docker Compose setup](setup/docker-compose-setup.md) and [Helm setup](setup/helm-setup.md) guides
+> for how to expose both the WebSocket (via Caddy) and QUIC (direct UDP) endpoints simultaneously.
 
 ## Benchmark <a name="bench"></a>
 

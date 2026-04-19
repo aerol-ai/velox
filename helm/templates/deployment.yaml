@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "velox.fullname" . }}
+  labels:
+    {{- include "velox.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "velox.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Force pod restart when restrictions ConfigMap changes.
+        {{- if .Values.velox.restrictConfig.enabled }}
+        checksum/config: {{ .Values.velox.restrictConfig.content | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "velox.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "velox.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Override the Docker CMD while keeping the dumb-init ENTRYPOINT.
+          args:
+            {{- include "velox.serverArgs" . | nindent 12 }}
+          env:
+            - name: RUST_LOG
+              value: {{ .Values.velox.logLevel | default "INFO" | quote }}
+          ports:
+            - name: ws
+              containerPort: {{ .Values.service.containerPort }}
+              protocol: TCP
+            {{- if .Values.velox.quic.enabled }}
+            - name: quic-udp
+              containerPort: {{ .Values.velox.quic.port }}
+              protocol: UDP
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.velox.restrictConfig.enabled }}
+          volumeMounts:
+            - name: restrictions-config
+              mountPath: /etc/velox
+              readOnly: true
+          {{- end }}
+      {{- if .Values.velox.restrictConfig.enabled }}
+      volumes:
+        - name: restrictions-config
+          configMap:
+            name: {{ include "velox.fullname" . }}-restrictions
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

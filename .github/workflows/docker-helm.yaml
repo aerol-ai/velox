@@ -1,0 +1,129 @@
+# Build and publish the Docker image to GHCR, then package and push the Helm
+# chart as an OCI artifact to GHCR.
+#
+# Triggers:
+#   • Push to main (tagged as :main and :sha-<short>)
+#   • Semver tag (v*) → also tagged as :<version> and :latest
+#
+# Outputs:
+#   • ghcr.io/<owner>/velox:<tag>
+#   • oci://ghcr.io/<owner>/charts   (Helm OCI registry)
+
+name: Docker & Helm Package
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # ── 1. Docker image ──────────────────────────────────────────────────────────
+  docker:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-24.04
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Use GitHub Actions cache to speed up repeated builds.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Build only the final production image (skips the builder_cache lint stage
+          # when an external cache hit is available; on cold builds the full lint
+          # stage runs, which is the desired CI behaviour).
+          target: final-image
+
+  # ── 2. Helm chart ─────────────────────────────────────────────────────────────
+  helm:
+    name: Package & Push Helm Chart
+    runs-on: ubuntu-24.04
+    needs: docker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: "latest"
+
+      - name: Determine chart version
+        id: chart_version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="0.0.0-${GITHUB_SHA::8}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Update Chart.yaml version
+        run: |
+          sed -i "s/^version:.*/version: ${{ steps.chart_version.outputs.version }}/" helm/Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ needs.docker.outputs.image_tag }}\"/" helm/Chart.yaml
+
+      - name: Lint Helm chart
+        run: helm lint helm/
+
+      - name: Package Helm chart
+        run: helm package helm/ --destination ./dist/
+
+      - name: Log in to GHCR for Helm
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            helm registry login ${{ env.REGISTRY }} \
+              --username "${{ github.actor }}" \
+              --password-stdin
+
+      - name: Push Helm chart to GHCR
+        run: |
+          CHART=$(ls dist/*.tgz | head -1)
+          helm push "$CHART" oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/charts
+
+      - name: Upload chart artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: dist/*.tgz
+          retention-days: 30

@@ -1,0 +1,17 @@
+apiVersion: v2
+name: velox
+description: Velox tunnel server — WebSocket/HTTP2/QUIC tunnel for bypassing firewalls and proxies
+type: application
+version: 0.1.0
+appVersion: "latest"
+keywords:
+  - tunnel
+  - websocket
+  - proxy
+  - vpn
+home: https://github.com/aerol-ai/velox
+sources:
+  - https://github.com/aerol-ai/velox
+maintainers:
+  - name: aerol-ai
+    url: https://github.com/aerol-ai

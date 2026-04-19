@@ -1,0 +1,7 @@
+# Patterns to ignore when building packages.
+.helmignore
+*.orig
+*.bak
+.git
+.gitignore
+.DS_Store

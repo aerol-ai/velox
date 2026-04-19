@@ -1,0 +1,70 @@
+# docker-compose.yml — Velox tunnel server + Caddy reverse proxy with auto-TLS
+#
+# Transport modes:
+#   WebSocket/HTTP2  — via Caddy (HTTPS/WSS, auto-TLS on port 443)
+#   QUIC             — direct UDP on port 8443 (TLS handled by velox itself;
+#                      Caddy cannot proxy UDP/QUIC)
+#
+# Quick start:
+#   cp .env.example .env          # set VELOX_DOMAIN and optionally QUIC_PORT
+#   docker compose up -d
+#
+# WebSocket client:
+#   velox client -L socks5://127.0.0.1:1080 wss://${VELOX_DOMAIN}
+# QUIC client (binary must be built with --features quic):
+#   velox client -L socks5://127.0.0.1:1080 quic://${VELOX_DOMAIN}:${QUIC_PORT:-8443}
+
+services:
+  # ─── Velox tunnel server ────────────────────────────────────────────────────
+  velox:
+    image: ghcr.io/aerol-ai/velox:latest
+    restart: unless-stopped
+    environment:
+      # Run plain WebSocket — Caddy terminates TLS externally.
+      SERVER_PROTOCOL: ws
+      SERVER_LISTEN: "[::]"
+      SERVER_PORT: "8080"
+      RUST_LOG: "${RUST_LOG:-INFO}"
+      # QUIC: velox handles TLS directly on a separate UDP port.
+      # Set QUIC_BIND to enable; leave blank to disable.
+      QUIC_BIND: "${QUIC_BIND:-[::]:${QUIC_PORT:-8443}}"
+      VELOX_EXTRA_ARGS: "${VELOX_EXTRA_ARGS:-}"
+    ports:
+      # QUIC is UDP-only — expose directly (Caddy cannot proxy UDP).
+      # Caddy handles port 443 (WebSocket/HTTP2 over TLS).
+      - "${QUIC_PORT:-8443}:${QUIC_PORT:-8443}/udp"
+    volumes:
+      # Uncomment to apply a custom restrictions config.
+      # The file controls which tunnels are permitted (host/port allowlist).
+      # - ./restrictions.yaml:/home/app/restrictions.yaml:ro
+      []
+    # velox does not expose an HTTP health endpoint, so we probe the TCP port.
+    healthcheck:
+      test: ["CMD-SHELL", "ss -tlnp | grep -q ':8080'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    # No external TCP ports — Caddy is the only TCP entry point.
+
+  # ─── Caddy reverse proxy with auto-TLS ──────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"          # HTTP (redirected to HTTPS by Caddy)
+      - "443:443"        # HTTPS / WSS
+      - "443:443/udp"    # HTTP/3 (QUIC) — optional, safe to remove
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data         # TLS certificate store (persisted)
+      - caddy_config:/config     # Caddy runtime config (persisted)
+    environment:
+      VELOX_DOMAIN: "${VELOX_DOMAIN:-localhost}"
+    depends_on:
+      velox:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+  caddy_config:

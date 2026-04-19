@@ -1,0 +1,175 @@
+# Run unit tests on every PR and push to main.
+# On success the test-status section of README.md is updated and committed
+# back to the PR branch (same-repo PRs only; fork PRs get a comment instead).
+
+name: CI — Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Fetch the PR head so we can push back to it (same-repo PRs)
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: "1.95.0"
+          override: true
+          components: rustfmt, clippy
+
+      # Cache compiled deps for faster subsequent runs
+      - name: Cache cargo registry & build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # ── Lint ────────────────────────────────────────────────────────────────
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --all -- -D warnings
+
+      # ── Unit tests (no Docker / integration tests) ───────────────────────────
+      # Integration tests in test_integrations.rs require testcontainers+Docker.
+      # They are excluded here and run separately in a nightly / pre-release job.
+      - name: Run unit tests
+        id: run_tests
+        run: |
+          cargo test --lib --bins 2>&1 | tee /tmp/test_output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      # ── Parse results ────────────────────────────────────────────────────────
+      - name: Parse test results
+        id: parse
+        if: always()
+        run: |
+          OUTPUT=$(cat /tmp/test_output.txt)
+
+          # Sum all "N passed" across multiple test-result lines
+          PASSED=$(echo "$OUTPUT" | grep -oE '[0-9]+ passed' | awk '{sum+=$1} END{print sum+0}')
+          FAILED=$(echo "$OUTPUT" | grep -oE '[0-9]+ failed' | awk '{sum+=$1} END{print sum+0}')
+          IGNORED=$(echo "$OUTPUT" | grep -oE '[0-9]+ ignored' | awk '{sum+=$1} END{print sum+0}')
+
+          if [ "$FAILED" -eq 0 ]; then
+            STATUS_EMOJI="✅"
+            STATUS_TEXT="passing"
+          else
+            STATUS_EMOJI="❌"
+            STATUS_TEXT="failing"
+          fi
+
+          DATE=$(date -u +"%Y-%m-%d")
+          BRANCH="${{ github.head_ref || github.ref_name }}"
+
+          {
+            echo "passed=$PASSED"
+            echo "failed=$FAILED"
+            echo "ignored=$IGNORED"
+            echo "status_emoji=$STATUS_EMOJI"
+            echo "status_text=$STATUS_TEXT"
+            echo "date=$DATE"
+            echo "branch=$BRANCH"
+          } >> "$GITHUB_OUTPUT"
+
+      # ── Update README test-status section ────────────────────────────────────
+      - name: Update README test status
+        if: always()
+        run: |
+          BLOCK="<!-- CI_TEST_RESULTS_START -->
+          | Metric | Value |
+          |--------|-------|
+          | Status | ${{ steps.parse.outputs.status_emoji }} ${{ steps.parse.outputs.status_text }} |
+          | Passed | ${{ steps.parse.outputs.passed }} |
+          | Failed | ${{ steps.parse.outputs.failed }} |
+          | Ignored | ${{ steps.parse.outputs.ignored }} |
+          | Branch | \`${{ steps.parse.outputs.branch }}\` |
+          | Last run | ${{ steps.parse.outputs.date }} |
+          <!-- CI_TEST_RESULTS_END -->"
+
+          # Replace the markers block in README.md
+          perl -i -0pe \
+            's|<!-- CI_TEST_RESULTS_START -->.*?<!-- CI_TEST_RESULTS_END -->|'"$BLOCK"'|s' \
+            README.md
+
+      # ── Commit back to PR branch (same-repo PRs) ─────────────────────────────
+      - name: Commit README update (same-repo PR)
+        if: |
+          always() &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git diff --staged --quiet && echo "No README changes." && exit 0
+          git commit -m "ci: update test status in README [skip ci]"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+
+      # ── Post comment for fork PRs ─────────────────────────────────────────────
+      - name: Post test results as PR comment (fork PRs)
+        if: |
+          always() &&
+          github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name != github.repository
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const passed  = '${{ steps.parse.outputs.passed }}';
+            const failed  = '${{ steps.parse.outputs.failed }}';
+            const ignored = '${{ steps.parse.outputs.ignored }}';
+            const emoji   = '${{ steps.parse.outputs.status_emoji }}';
+            const text    = '${{ steps.parse.outputs.status_text }}';
+            const date    = '${{ steps.parse.outputs.date }}';
+            const branch  = '${{ steps.parse.outputs.branch }}';
+
+            const body = [
+              `## ${emoji} CI Test Results — ${text}`,
+              '',
+              '| Metric | Value |',
+              '|--------|-------|',
+              `| Status | ${emoji} ${text} |`,
+              `| Passed | ${passed} |`,
+              `| Failed | ${failed} |`,
+              `| Ignored | ${ignored} |`,
+              `| Branch | \`${branch}\` |`,
+              `| Date | ${date} |`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      # ── Fail job if tests actually failed ────────────────────────────────────
+      - name: Assert tests passed
+        if: always()
+        run: |
+          if [ "${{ steps.parse.outputs.failed }}" != "0" ]; then
+            echo "❌ ${{ steps.parse.outputs.failed }} test(s) failed."
+            exit 1
+          fi
+          echo "✅ All ${{ steps.parse.outputs.passed }} tests passed."

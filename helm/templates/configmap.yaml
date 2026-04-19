@@ -1,0 +1,11 @@
+{{- if .Values.velox.restrictConfig.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "velox.fullname" . }}-restrictions
+  labels:
+    {{- include "velox.labels" . | nindent 4 }}
+data:
+  restrictions.yaml: |
+    {{- .Values.velox.restrictConfig.content | nindent 4 }}
+{{- end }}

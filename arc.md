@@ -13,15 +13,22 @@ End-to-end reference for how the CLI and the server work, and a catalogue of the
    Stdio / SOCKS5         (per -L arg)   JWT-in-upgrade          Restriction check  │                (per tunnel request)
    HTTP proxy / TProxy                   WS or HTTP/2            JWT parse          ▼
                                          transport                                 Reverse listener  (for -R tunnels)
+
+                                         ─── OR ───
+
+                          quic_state ──► QUIC endpoint ──►  QUIC endpoint ──► bi-stream per tunnel ──►  Connector ──► TCP / UDP / SOCKS5
+   UDP flows                             (single shared         JWT-in-stream                             QUIC DATAGRAM for UDP tunnels
+                                         connection)            Restriction check
+                                         QUIC DATAGRAM          per-conn datagram hub
 ```
 
 Every tunnel, forward or reverse, is the same assembly line:
 
 1. **A listener accepts a local connection.**
-2. **`WsClient` gets (or creates) a transport connection** to the server (pooled, potentially TLS, optionally through an HTTP proxy).
-3. **A JWT envelope** describes "I want a tunnel of kind X to host:port Y" and travels in the WS upgrade / H2 request headers.
+2. **`WsClient` gets (or creates) a transport connection** to the server — pooled WS/H2 connections via `bb8::Pool<WsConnection>`, or a shared QUIC connection via `quic_state` (one per client, multiplexed as bi-streams).
+3. **A JWT envelope** describes "I want a tunnel of kind X to host:port Y" and travels in the WS upgrade / H2 request headers (WS/H2) or as a length-prefixed binary frame on the first bytes of a QUIC bi-stream.
 4. **Server validates** (upgrade path, mTLS, restrictions YAML) and either opens an outbound connection (forward) or binds a new listener (reverse).
-5. **Two `propagate_*` tasks** shuffle bytes in both directions until one side closes.
+5. **Two `propagate_*` tasks** shuffle bytes in both directions until one side closes. UDP tunnels over QUIC use QUIC DATAGRAM frames (RFC 9221) via the `QuicDatagramHub` flow multiplexer instead of a reliable stream.
 
 ---
 
@@ -53,8 +60,8 @@ Every tunnel, forward or reverse, is the same assembly line:
 ### 2.3 Subcommands
 
 Two verbs only:
-- `wstunnel client <ws[s]|http[s]://server> [-L ...]... [-R ...]... [options]`
-- `wstunnel server <ws[s]://bind> [options]`
+- `wstunnel client <ws[s]|http[s]|quic://server> [-L ...]... [-R ...]... [options]`
+- `wstunnel server <ws[s]://bind> [--quic-bind addr:port] [options]`
 
 There is no `--config` top-level file; configuration is purely flags + environment (`HTTP_PROXY`, `NO_COLOR`, `RUST_LOG`, `TOKIO_WORKER_THREADS`, `WSTUNNEL_HTTP_PROXY_LOGIN`/`PASSWORD`, `WSTUNNEL_HTTP_UPGRADE_PATH_PREFIX`, `WSTUNNEL_RESTRICT_HTTP_UPGRADE_PATH_PREFIX`).
 
@@ -108,7 +115,13 @@ The client keeps one long-lived transport connection per `-R` arg:
 
 `bb8::ManageConnection` impl on `WsConnection`. Opens a new transport connection on demand, honors `--connection-min-idle` to pre-warm the pool, respects `socket_so_mark`, timeouts, DNS resolver, TLS config. Connections older than 30s are reaped.
 
-### 3.6 TLS reload (`tunnel/tls_reloader.rs`)
+When the transport scheme is `quic://`, the pool is bypassed: `connection_min_idle` is forced to 0 and `WsClient::quic_state` holds the live `QuicClientState` (QUIC endpoint + connection + datagram hub) instead. New tunnels call `transport/quic.rs::connect` which reuses or re-establishes the shared QUIC connection and opens a new bi-directional stream.
+
+### 3.6 L4 transport stream (`tunnel/client/l4_transport_stream.rs`)
+
+`TransportStream` is an enum-dispatched `AsyncRead + AsyncWrite` over plain TCP, client-side TLS, and server-side TLS. Wraps each half with an optional pre-buffered `Bytes` (for bytes already read during TLS negotiation).
+
+### 3.7 TLS reload (`tunnel/tls_reloader.rs`)
 
 Watches `tls_certificate_path` / `tls_key_path` / `tls_client_ca_certs_path` using `notify`. When a change is detected, rebuilds the rustls config and swaps it behind an `Arc<RwLock<…>>` — existing connections keep their old config; new ones pick up the new cert/CA.
 
@@ -137,6 +150,7 @@ Watches `tls_certificate_path` / `tls_key_path` / `tls_client_ca_certs_path` usi
     - If the client presented a cert, `cn_from_certificate` is extracted and passed down as the **required path prefix for that connection**. This is how mTLS CN → restriction routing works.
   - **No TLS** — `hyper_util::server::conn::auto::Builder` auto-detects HTTP/1.1 vs HTTP/2; for H/1 the request is then inspected for `Upgrade: websocket`. If neither upgrade is possible, it rejects with 400.
 - Each connection runs in its own tokio task, inside a `cnx{peer=…}` tracing span.
+- **QUIC** — if `--quic-bind` is set, `create_quic_endpoint` binds a separate UDP socket using `quinn::Endpoint::server`. A sibling task (`quic_server_serve`) runs the accept loop, handling one `quinn::Connection` per client, each carrying many tunnels as independent bi-streams. The same `RestrictionsRules` and `exec_tunnel` path is reused. TLS cert reloads are propagated via `endpoint.set_server_config`.
 
 ### 4.3 Per-request handling — `handle_tunnel_request`
 
@@ -209,7 +223,42 @@ Abstracts over WS and H/2. Two pump functions:
 - Server: `hyper::server::conn::http2` upgrades the request, consumes the streaming body as the "up" direction and the response body as the "down" direction.
 - Caveats documented in `config.rs` clap help: any reverse proxy that buffers request bodies or downgrades to HTTP/1 breaks this transport.
 
-### 5.4 JWT (`jwt.rs`)
+### 5.4 QUIC (`quic.rs`) — requires `--features quic`
+
+Built on `quinn` (pure-Rust QUIC over `tokio`). Uses a **single long-lived QUIC connection** per client, held in `WsClient::quic_state` (`Arc<Mutex<Option<QuicClientState>>>`). Each tunnel runs as an independent bi-directional QUIC stream, eliminating TCP head-of-line blocking.
+
+**Wire format per bi-stream (client → server header):**
+```
+[preamble: "WSTUNNEL/1\n" (11 bytes)]
+[u16 BE path_prefix_len][path_prefix]
+[u16 BE jwt_len][jwt]
+[u16 BE auth_len][authorization]      // empty = absent
+[u8 num_headers]
+{ [u16 BE name_len][name][u16 BE val_len][value] } × num_headers
+[u8 transport_mode]                   // 0 = stream, 1 = QUIC DATAGRAM
+[u32 BE flow_id]                      // non-zero only for datagram tunnels
+<then raw tunneled bytes for stream mode>
+```
+
+**Server → client response header:**
+```
+[preamble: "WSTUNNEL/1\n" (11 bytes)]
+[u8 status]                           // 0 = OK, 1 = bad request, 2 = forbidden, 3 = internal error
+[u16 BE reason_len][reason]
+[u16 BE cookie_len][cookie]           // JWT for dynamic reverse tunnels
+```
+
+**UDP tunnels** use QUIC DATAGRAM frames (RFC 9221) instead of streams. Each UDP flow gets a `flow_id` (u32). The `QuicDatagramHub` per connection demultiplexes incoming datagrams by flow_id using a `HashMap<u32, mpsc::Sender<Bytes>>` protected by a `parking_lot::Mutex`. Wire: `u32 BE flow_id || payload`.
+
+**ALPN**: `wstunnel` (constant `QUIC_ALPN`).
+
+**mTLS over QUIC**: `extract_restrict_path_prefix` reads the CN from `connection.peer_identity()` (same logic as TLS).
+
+**Key config fields** (gated by `#[cfg(feature = "quic")]`):
+- Client: `quic_0rtt`, `quic_keep_alive`, `quic_max_idle_timeout`, `quic_max_streams`, `quic_datagram_buffer_size`.
+- Server: `quic_bind`, plus all the above plus `quic_disable_migration`.
+
+### 5.5 JWT (`jwt.rs`)
 
 ```rust
 struct JwtTunnelConfig { id: String, p: LocalProtocol, r: String, rp: u16 }
@@ -254,6 +303,7 @@ Trait-based executor abstraction so the library can be driven by a custom spawn 
 | `ring`               | Alternative crypto backend. Needed on some musl / Android / freebsd cross targets.       |
 | `aws-lc-rs-bindgen`  | Forces aws-lc-rs to use bindgen (for targets without prebuilt bindings).                 |
 | `clap` (wstunnel lib)| Derives CLI args on `Client` / `Server`. Always on when built from `wstunnel-cli`.       |
+| `quic`               | Enables QUIC transport via `quinn`. Adds `--features quic` to CLI; `quic://` URL scheme. |
 | `jemalloc` (cli)     | Swaps the global allocator to `tikv-jemallocator`. Used in release/Docker builds.        |
 
 ---
@@ -287,7 +337,8 @@ Drawn from the README, CLI help, `config.rs`, `restrictions.yaml`, and the modul
 
 16. **WebSocket transport** — `ws://` (cleartext) or `wss://` (TLS). Recommended path; works with most reverse proxies.
 17. **HTTP/2 transport** — `http://` / `https://`. For when WS is blocked. Requires direct exposure — most reverse proxies break it.
-18. **Via HTTP proxy** — `-p http://user:pass@host:port`. Client tunnels out through a corporate proxy first. Server can also be configured with the same (for reverse-tunnel back-connections).
+18. **QUIC transport** — `quic://` (always TLS). Requires `--features quic`. Single QUIC connection per client; each tunnel is an independent bi-stream. UDP tunnels use QUIC DATAGRAM frames. Enables 0-RTT, connection migration, and eliminates TCP HoL blocking.
+19. **Via HTTP proxy** — `-p http://user:pass@host:port`. Client tunnels out through a corporate proxy first. Server can also be configured with the same (for reverse-tunnel back-connections).
 
 ### 8.4 TLS / authentication
 
@@ -325,7 +376,7 @@ Drawn from the README, CLI help, `config.rs`, `restrictions.yaml`, and the modul
 
 ### 8.9 Performance / connection pool
 
-35. **Warm connection pool** — `--connection-min-idle N`. Pre-opens N TLS sessions so new tunnels skip the TCP + TLS handshake. Critical for browser/SOCKS5 workloads.
+35. **Warm connection pool** — `--connection-min-idle N`. Pre-opens N TLS sessions so new tunnels skip the TCP + TLS handshake. Critical for browser/SOCKS5 workloads. Not used for QUIC (pool forced to 0; connection reuse is inherent).
 36. **Configurable retry backoff** — `--connection-retry-max-backoff` (forward) and `--reverse-tunnel-connection-retry-max-backoff`.
 37. **WebSocket ping keepalive** — `--websocket-ping-frequency-sec`, on by default (30s).
 38. **SO_MARK** — `--socket-so-mark N` (Linux) for policy routing / excluding tunnel traffic from VPNs.
@@ -340,9 +391,19 @@ Drawn from the README, CLI help, `config.rs`, `restrictions.yaml`, and the modul
 
 ### 8.11 Observability
 
-44. **Structured tracing** — `tracing` + `tracing-subscriber`, `RUST_LOG`/`--log-lvl`, per-connection and per-tunnel spans with `peer`, `id`, `remote`, `forwarded_for` fields.
+44. **Structured tracing** — `tracing` + `tracing-subscriber`, `RUST_LOG`/`--log-lvl`, per-connection and per-tunnel spans with `peer`, `id`, `remote`, `forwarded_for` fields. QUIC tunnels emit the same `tunnel{id,remote}` span shape.
 45. **`--no-color`** / `NO_COLOR` env support.
 
 ### 8.12 Library embedding
 
 46. **`wstunnel` as a Rust library** — `run_client`, `run_server`, `create_client` are `pub`; `WsClient`, `WsServer`, `WsClientConfig`, `WsServerConfig`, `LocalProtocol`, `TlsClientConfig` are re-exported. Custom executor via `TokioExecutor` trait lets embedders control task spawning.
+
+### 8.13 QUIC-specific tuning
+
+47. **QUIC 0-RTT** — `--quic-0rtt` on both client and server. Client resumes with a cached ticket; server accepts early data. Off by default.
+48. **QUIC keepalive** — `--quic-keep-alive SECS` (QUIC PING at transport level). Supersedes WS application-level pings for QUIC connections.
+49. **QUIC idle timeout** — `--quic-max-idle-timeout SECS`. QUIC connections are closed after this many seconds of silence.
+50. **QUIC stream budget** — `--quic-max-streams N` (default 1024). Per-connection concurrency cap.
+51. **QUIC datagram buffer** — `--quic-datagram-buffer-size BYTES` (default 1 MiB). Capacity of the datagram send/receive buffer.
+52. **Disable connection migration** — `--quic-disable-migration`. Escape hatch if middleboxes are confused by CID changes.
+53. **Separate QUIC bind** — server uses `--quic-bind 0.0.0.0:PORT` to accept QUIC connections on a dedicated UDP port while the main TCP listener stays on its own port.

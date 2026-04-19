@@ -10,7 +10,9 @@
 //! [u16 BE auth_len][authorization: utf-8]      // empty = no Authorization header
 //! [u8 num_headers]
 //! { [u16 BE name_len][name][u16 BE val_len][value] } x num_headers
-//! <then raw tunneled bytes>
+//! [u8 transport_mode]                           // 0 = reliable stream, 1 = datagram
+//! [u32 BE flow_id]                              // non-zero only for datagram tunnels
+//! <then raw tunneled bytes on the stream, if transport_mode == 0>
 //! ```
 //!
 //! Server → Client (first bytes once the request is validated):
@@ -19,29 +21,34 @@
 //! [u8 status]                                  // 0 = OK, non-zero = error
 //! [u16 BE reason_len][reason: utf-8]
 //! [u16 BE cookie_len][cookie: utf-8]           // JWT cookie for dynamic reverse tunnels
-//! <then raw tunneled bytes>
+//! <then raw tunneled bytes on the stream, if transport_mode == 0>
 //! ```
 
 use super::io::{MAX_PACKET_LENGTH, TunnelRead, TunnelWrite};
+use crate::tunnel::LocalProtocol;
 use crate::tunnel::RemoteAddr;
 use crate::tunnel::client::WsClient;
 use crate::tunnel::transport::jwt::tunnel_to_jwt_token;
 use anyhow::{Context, anyhow};
-use bytes::BytesMut;
+use bytes::{BufMut, Bytes, BytesMut};
+use futures_util::FutureExt;
 use hyper::header::{COOKIE, HeaderValue};
 use hyper::http::response::Parts;
 use hyper::{Response, StatusCode, Version};
+use parking_lot::Mutex;
 use quinn::{RecvStream, SendStream};
+use std::collections::HashMap;
 use std::future::Future;
 use std::io;
 use std::io::ErrorKind;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, mpsc};
 use tokio_rustls::rustls::pki_types::ServerName;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 const PREAMBLE: &[u8; 11] = b"WSTUNNEL/1\n";
@@ -61,11 +68,38 @@ pub const STATUS_INTERNAL_ERROR: u8 = 3;
 const QUIC_KEEP_ALIVE: Duration = Duration::from_secs(15);
 const QUIC_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 const QUIC_MAX_BIDI_STREAMS: u32 = 1024;
+const QUIC_DATAGRAM_BUFFER_SIZE: usize = 1024 * 1024;
+const QUIC_DATAGRAM_CHANNEL_SIZE: usize = 64;
+const QUIC_DATAGRAM_FLOW_PREFIX_LEN: usize = 4;
 pub const QUIC_ALPN: &[u8] = b"wstunnel";
 
 // ============================================================================
 // Wire format
 // ============================================================================
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum QuicTransportMode {
+    #[default]
+    Stream = 0,
+    Datagram = 1,
+}
+
+impl QuicTransportMode {
+    fn from_protocol(protocol: &LocalProtocol) -> Self {
+        match protocol {
+            LocalProtocol::Udp { .. } | LocalProtocol::ReverseUdp { .. } => Self::Datagram,
+            _ => Self::Stream,
+        }
+    }
+
+    fn from_u8(mode: u8) -> anyhow::Result<Self> {
+        match mode {
+            0 => Ok(Self::Stream),
+            1 => Ok(Self::Datagram),
+            _ => Err(anyhow!("invalid QUIC transport mode: {mode}")),
+        }
+    }
+}
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct QuicRequestHeader {
@@ -73,6 +107,8 @@ pub struct QuicRequestHeader {
     pub jwt: String,
     pub authorization: Option<String>,
     pub headers: Vec<(String, String)>,
+    pub transport_mode: QuicTransportMode,
+    pub flow_id: u32,
 }
 
 impl QuicRequestHeader {
@@ -87,6 +123,8 @@ impl QuicRequestHeader {
             write_u16_prefixed(w, name.as_bytes()).await?;
             write_u16_prefixed(w, val.as_bytes()).await?;
         }
+        w.write_u8(self.transport_mode as u8).await?;
+        w.write_u32(self.flow_id).await?;
         Ok(())
     }
 
@@ -111,11 +149,15 @@ impl QuicRequestHeader {
             let value = read_u16_prefixed_string(r, MAX_HEADER_VALUE_LEN, "header value").await?;
             headers.push((name, value));
         }
+        let transport_mode = QuicTransportMode::from_u8(r.read_u8().await.context("reading transport mode")?)?;
+        let flow_id = r.read_u32().await.context("reading flow id")?;
         Ok(Self {
             path_prefix,
             jwt,
             authorization,
             headers,
+            transport_mode,
+            flow_id,
         })
     }
 }
@@ -197,13 +239,13 @@ async fn read_u16_prefixed_string<R: AsyncReadExt + Unpin>(
 // TunnelRead / TunnelWrite implementations
 // ============================================================================
 
-pub struct QuicTunnelWrite {
+pub struct QuicStreamTunnelWrite {
     inner: SendStream,
     buf: BytesMut,
     notify: Arc<Notify>,
 }
 
-impl QuicTunnelWrite {
+impl QuicStreamTunnelWrite {
     pub fn new(send: SendStream) -> Self {
         Self {
             inner: send,
@@ -213,7 +255,7 @@ impl QuicTunnelWrite {
     }
 }
 
-impl TunnelWrite for QuicTunnelWrite {
+impl TunnelWrite for QuicStreamTunnelWrite {
     fn buf_mut(&mut self) -> &mut BytesMut {
         &mut self.buf
     }
@@ -254,17 +296,17 @@ impl TunnelWrite for QuicTunnelWrite {
     }
 }
 
-pub struct QuicTunnelRead {
+pub struct QuicStreamTunnelRead {
     inner: RecvStream,
 }
 
-impl QuicTunnelRead {
+impl QuicStreamTunnelRead {
     pub fn new(recv: RecvStream) -> Self {
         Self { inner: recv }
     }
 }
 
-impl TunnelRead for QuicTunnelRead {
+impl TunnelRead for QuicStreamTunnelRead {
     async fn copy(&mut self, mut writer: impl AsyncWrite + Unpin + Send) -> Result<(), io::Error> {
         let mut buf = vec![0u8; MAX_PACKET_LENGTH];
         match self.inner.read(&mut buf).await {
@@ -281,14 +323,260 @@ impl TunnelRead for QuicTunnelRead {
     }
 }
 
+pub(crate) struct QuicDatagramHub {
+    connection: quinn::Connection,
+    flows: Mutex<HashMap<u32, mpsc::Sender<Bytes>>>,
+    next_flow_id: AtomicU32,
+}
+
+impl QuicDatagramHub {
+    pub(crate) fn new(connection: quinn::Connection) -> Arc<Self> {
+        Arc::new(Self {
+            connection,
+            flows: Mutex::new(HashMap::new()),
+            next_flow_id: AtomicU32::new(1),
+        })
+    }
+
+    fn allocate_flow_id(&self) -> u32 {
+        self.next_flow_id.fetch_add(1, Ordering::Relaxed)
+    }
+
+    pub(crate) fn register_flow(
+        self: &Arc<Self>,
+        flow_id: u32,
+    ) -> anyhow::Result<(QuicDatagramTunnelRead, QuicDatagramTunnelWrite)> {
+        if flow_id == 0 {
+            return Err(anyhow!("flow id 0 is reserved for stream-based QUIC tunnels"));
+        }
+
+        let (tx, rx) = mpsc::channel(QUIC_DATAGRAM_CHANNEL_SIZE);
+        let previous = self.flows.lock().insert(flow_id, tx);
+        if previous.is_some() {
+            return Err(anyhow!("datagram flow id {flow_id} is already registered"));
+        }
+
+        let registration = Arc::new(QuicDatagramFlowRegistration {
+            flow_id,
+            hub: Arc::downgrade(self),
+        });
+        Ok((
+            QuicDatagramTunnelRead {
+                inner: rx,
+                _registration: registration.clone(),
+            },
+            QuicDatagramTunnelWrite {
+                connection: self.connection.clone(),
+                flow_id,
+                buf: BytesMut::with_capacity(MAX_PACKET_LENGTH),
+                notify: Arc::new(Notify::new()),
+                _registration: registration,
+            },
+        ))
+    }
+
+    fn unregister_flow(&self, flow_id: u32) {
+        self.flows.lock().remove(&flow_id);
+    }
+
+    pub(crate) async fn run(self: Arc<Self>) {
+        loop {
+            let datagram = match self.connection.read_datagram().await {
+                Ok(datagram) => datagram,
+                Err(err) => {
+                    debug!("Stopping QUIC datagram router: {err}");
+                    break;
+                }
+            };
+
+            let Some((flow_id, payload)) = decode_datagram(datagram) else {
+                warn!("Dropping malformed QUIC datagram shorter than flow prefix");
+                continue;
+            };
+
+            let sender = self.flows.lock().get(&flow_id).cloned();
+            let Some(sender) = sender else {
+                debug!("Dropping QUIC datagram for unknown flow {flow_id}");
+                continue;
+            };
+
+            if sender.try_send(payload).is_err() {
+                debug!("Dropping QUIC datagram for backpressured flow {flow_id}");
+            }
+        }
+
+        self.flows.lock().clear();
+    }
+}
+
+struct QuicDatagramFlowRegistration {
+    flow_id: u32,
+    hub: Weak<QuicDatagramHub>,
+}
+
+impl Drop for QuicDatagramFlowRegistration {
+    fn drop(&mut self) {
+        if let Some(hub) = self.hub.upgrade() {
+            hub.unregister_flow(self.flow_id);
+        }
+    }
+}
+
+pub struct QuicDatagramTunnelWrite {
+    connection: quinn::Connection,
+    flow_id: u32,
+    buf: BytesMut,
+    notify: Arc<Notify>,
+    _registration: Arc<QuicDatagramFlowRegistration>,
+}
+
+impl TunnelWrite for QuicDatagramTunnelWrite {
+    fn buf_mut(&mut self) -> &mut BytesMut {
+        &mut self.buf
+    }
+
+    async fn write(&mut self) -> Result<(), io::Error> {
+        if self.buf.is_empty() {
+            return Ok(());
+        }
+
+        let payload = self.buf.split().freeze();
+        self.connection
+            .send_datagram_wait(encode_datagram(self.flow_id, payload))
+            .await
+            .map_err(map_datagram_write_error)?;
+        if self.buf.capacity() < MAX_PACKET_LENGTH {
+            self.buf.reserve(MAX_PACKET_LENGTH);
+        }
+        Ok(())
+    }
+
+    async fn ping(&mut self) -> Result<(), io::Error> {
+        Ok(())
+    }
+
+    async fn close(&mut self) -> Result<(), io::Error> {
+        Ok(())
+    }
+
+    fn pending_operations_notify(&mut self) -> Arc<Notify> {
+        self.notify.clone()
+    }
+
+    fn handle_pending_operations(&mut self) -> impl Future<Output = Result<(), io::Error>> + Send {
+        std::future::ready(Ok(()))
+    }
+}
+
+pub struct QuicDatagramTunnelRead {
+    inner: mpsc::Receiver<Bytes>,
+    _registration: Arc<QuicDatagramFlowRegistration>,
+}
+
+impl TunnelRead for QuicDatagramTunnelRead {
+    async fn copy(&mut self, mut writer: impl AsyncWrite + Unpin + Send) -> Result<(), io::Error> {
+        let data = match self.inner.recv().await {
+            Some(data) => data,
+            None => return Err(io::Error::new(ErrorKind::BrokenPipe, "QUIC datagram flow finished")),
+        };
+        writer
+            .write_all(data.as_ref())
+            .await
+            .map_err(|err| io::Error::new(ErrorKind::ConnectionAborted, err))
+    }
+}
+
+pub enum QuicTunnelWrite {
+    Stream(QuicStreamTunnelWrite),
+    Datagram(QuicDatagramTunnelWrite),
+}
+
+impl TunnelWrite for QuicTunnelWrite {
+    fn buf_mut(&mut self) -> &mut BytesMut {
+        match self {
+            Self::Stream(stream) => stream.buf_mut(),
+            Self::Datagram(datagram) => datagram.buf_mut(),
+        }
+    }
+
+    async fn write(&mut self) -> Result<(), io::Error> {
+        match self {
+            Self::Stream(stream) => stream.write().await,
+            Self::Datagram(datagram) => datagram.write().await,
+        }
+    }
+
+    async fn ping(&mut self) -> Result<(), io::Error> {
+        match self {
+            Self::Stream(stream) => stream.ping().await,
+            Self::Datagram(datagram) => datagram.ping().await,
+        }
+    }
+
+    async fn close(&mut self) -> Result<(), io::Error> {
+        match self {
+            Self::Stream(stream) => stream.close().await,
+            Self::Datagram(datagram) => datagram.close().await,
+        }
+    }
+
+    fn pending_operations_notify(&mut self) -> Arc<Notify> {
+        match self {
+            Self::Stream(stream) => stream.pending_operations_notify(),
+            Self::Datagram(datagram) => datagram.pending_operations_notify(),
+        }
+    }
+
+    fn handle_pending_operations(&mut self) -> impl Future<Output = Result<(), io::Error>> + Send {
+        match self {
+            Self::Stream(stream) => stream.handle_pending_operations().left_future(),
+            Self::Datagram(datagram) => datagram.handle_pending_operations().right_future(),
+        }
+    }
+}
+
+pub enum QuicTunnelRead {
+    Stream(QuicStreamTunnelRead),
+    Datagram(QuicDatagramTunnelRead),
+}
+
+impl TunnelRead for QuicTunnelRead {
+    async fn copy(&mut self, writer: impl AsyncWrite + Unpin + Send) -> Result<(), io::Error> {
+        match self {
+            Self::Stream(stream) => stream.copy(writer).await,
+            Self::Datagram(datagram) => datagram.copy(writer).await,
+        }
+    }
+}
+
+fn encode_datagram(flow_id: u32, payload: Bytes) -> Bytes {
+    let mut data = BytesMut::with_capacity(QUIC_DATAGRAM_FLOW_PREFIX_LEN + payload.len());
+    data.put_u32(flow_id);
+    data.extend_from_slice(payload.as_ref());
+    data.freeze()
+}
+
+fn decode_datagram(datagram: Bytes) -> Option<(u32, Bytes)> {
+    if datagram.len() < QUIC_DATAGRAM_FLOW_PREFIX_LEN {
+        return None;
+    }
+    let flow_id = u32::from_be_bytes(datagram[..QUIC_DATAGRAM_FLOW_PREFIX_LEN].try_into().ok()?);
+    Some((flow_id, datagram.slice(QUIC_DATAGRAM_FLOW_PREFIX_LEN..)))
+}
+
+fn map_datagram_write_error(err: quinn::SendDatagramError) -> io::Error {
+    io::Error::new(ErrorKind::ConnectionAborted, err)
+}
+
 // ============================================================================
 // Client: persistent endpoint + connection per WsClient
 // ============================================================================
 
 pub struct QuicClientState {
     /// Kept alive so the endpoint driver task isn't dropped.
-    pub _endpoint: quinn::Endpoint,
-    pub connection: quinn::Connection,
+    pub(crate) _endpoint: quinn::Endpoint,
+    pub(crate) connection: quinn::Connection,
+    pub(crate) datagram_hub: Arc<QuicDatagramHub>,
 }
 
 /// Build a `quinn::TransportConfig` with sensible defaults for tunnel workloads.
@@ -299,6 +587,8 @@ pub fn build_transport_config() -> anyhow::Result<Arc<quinn::TransportConfig>> {
         quinn::IdleTimeout::try_from(QUIC_IDLE_TIMEOUT).map_err(|e| anyhow!("invalid idle timeout: {e}"))?,
     ));
     transport.max_concurrent_bidi_streams(QUIC_MAX_BIDI_STREAMS.into());
+    transport.datagram_receive_buffer_size(Some(QUIC_DATAGRAM_BUFFER_SIZE));
+    transport.datagram_send_buffer_size(QUIC_DATAGRAM_BUFFER_SIZE);
     Ok(Arc::new(transport))
 }
 
@@ -372,24 +662,27 @@ async fn establish_new_connection(client: &WsClient<impl crate::TokioExecutorRef
         .with_context(|| format!("failed to start QUIC connection to {server_addr}"))?
         .await
         .with_context(|| format!("QUIC handshake failed with {server_addr}"))?;
+    let datagram_hub = QuicDatagramHub::new(connection.clone());
+    client.executor.clone().spawn(datagram_hub.clone().run());
     info!("QUIC connection established with {server_addr}");
     Ok(QuicClientState {
         _endpoint: endpoint,
         connection,
+        datagram_hub,
     })
 }
 
 /// Returns a live `quinn::Connection` for this client, opening a new one if necessary.
 /// Connections are reused across all tunnels of the same `WsClient` so multiple `-L`/`-R`
 /// tunnels share a single QUIC handshake + datagram stream.
-pub async fn get_or_create_connection(
+async fn get_or_create_connection(
     client: &WsClient<impl crate::TokioExecutorRef>,
-) -> anyhow::Result<quinn::Connection> {
+) -> anyhow::Result<(quinn::Connection, Arc<QuicDatagramHub>)> {
     let mut guard = client.quic_state.lock().await;
     if let Some(state) = guard.as_ref()
         && state.connection.close_reason().is_none()
     {
-        return Ok(state.connection.clone());
+        return Ok((state.connection.clone(), state.datagram_hub.clone()));
     }
     if let Some(state) = guard.as_ref() {
         debug!(
@@ -399,8 +692,9 @@ pub async fn get_or_create_connection(
     }
     let state = establish_new_connection(client).await?;
     let connection = state.connection.clone();
+    let datagram_hub = state.datagram_hub.clone();
     *guard = Some(state);
-    Ok(connection)
+    Ok((connection, datagram_hub))
 }
 
 async fn invalidate_connection(client: &WsClient<impl crate::TokioExecutorRef>) {
@@ -418,8 +712,8 @@ pub async fn connect(
     dest_addr: &RemoteAddr,
 ) -> anyhow::Result<(QuicTunnelRead, QuicTunnelWrite, Parts)> {
     // Acquire (or open) the shared QUIC connection.
-    let connection = match get_or_create_connection(client).await {
-        Ok(c) => c,
+    let (connection, datagram_hub) = match get_or_create_connection(client).await {
+        Ok(state) => state,
         Err(err) => {
             invalidate_connection(client).await;
             return Err(err);
@@ -438,6 +732,18 @@ pub async fn connect(
 
     let cfg = &client.config;
     let jwt_token = tunnel_to_jwt_token(request_id, dest_addr);
+    let transport_mode = QuicTransportMode::from_protocol(&dest_addr.protocol);
+    let datagram_flow = match transport_mode {
+        QuicTransportMode::Stream => None,
+        QuicTransportMode::Datagram => {
+            if connection.max_datagram_size().is_none() {
+                invalidate_connection(client).await;
+                return Err(anyhow!("QUIC peer does not support DATAGRAM frames"));
+            }
+            let flow_id = datagram_hub.allocate_flow_id();
+            Some((flow_id, datagram_hub.register_flow(flow_id)?))
+        }
+    };
 
     let authorization = cfg
         .http_upgrade_credentials
@@ -458,6 +764,8 @@ pub async fn connect(
         jwt: jwt_token,
         authorization,
         headers,
+        transport_mode,
+        flow_id: datagram_flow.as_ref().map(|(flow_id, _)| *flow_id).unwrap_or_default(),
     };
 
     if let Err(err) = header.write(&mut send).await {
@@ -498,7 +806,17 @@ pub async fn connect(
     let http_response = builder.body(()).unwrap();
     let (parts, _) = http_response.into_parts();
 
-    Ok((QuicTunnelRead::new(recv), QuicTunnelWrite::new(send), parts))
+    if let Some((_flow_id, (rx, tx))) = datagram_flow {
+        let _ = send.finish();
+        drop(recv);
+        Ok((QuicTunnelRead::Datagram(rx), QuicTunnelWrite::Datagram(tx), parts))
+    } else {
+        Ok((
+            QuicTunnelRead::Stream(QuicStreamTunnelRead::new(recv)),
+            QuicTunnelWrite::Stream(QuicStreamTunnelWrite::new(send)),
+            parts,
+        ))
+    }
 }
 
 // ============================================================================
@@ -521,6 +839,8 @@ mod tests {
                 ("Host".into(), "example.com".into()),
                 ("X-Custom".into(), "value".into()),
             ],
+            transport_mode: QuicTransportMode::Datagram,
+            flow_id: 7,
         };
 
         let (mut a, mut b) = duplex(8192);
@@ -537,6 +857,8 @@ mod tests {
             jwt: "j".into(),
             authorization: None,
             headers: vec![],
+            transport_mode: QuicTransportMode::Stream,
+            flow_id: 0,
         };
         let (mut a, mut b) = duplex(1024);
         original.write(&mut a).await.unwrap();
@@ -572,5 +894,14 @@ mod tests {
         let mut bad = Cursor::new(b"NOTAPREAMBLE0\x00".to_vec());
         let err = QuicRequestHeader::read(&mut bad).await.err().unwrap();
         assert!(format!("{err}").contains("preamble"));
+    }
+
+    #[test]
+    fn datagram_roundtrip() {
+        let payload = Bytes::from_static(b"hello");
+        let datagram = encode_datagram(42, payload.clone());
+        let (flow_id, restored_payload) = decode_datagram(datagram).unwrap();
+        assert_eq!(flow_id, 42);
+        assert_eq!(restored_payload, payload);
     }
 }

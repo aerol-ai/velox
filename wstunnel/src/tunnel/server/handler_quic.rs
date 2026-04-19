@@ -6,8 +6,8 @@ use crate::tunnel::server::WsServer;
 use crate::tunnel::server::utils::validate_tunnel;
 use crate::tunnel::transport;
 use crate::tunnel::transport::quic::{
-    QUIC_ALPN, QuicRequestHeader, QuicResponseHeader, QuicTunnelRead, QuicTunnelWrite, STATUS_BAD_REQUEST,
-    STATUS_FORBIDDEN, STATUS_INTERNAL_ERROR,
+    QUIC_ALPN, QuicRequestHeader, QuicResponseHeader, QuicStreamTunnelRead, QuicStreamTunnelWrite, QuicTransportMode,
+    QuicTunnelRead, QuicTunnelWrite, STATUS_BAD_REQUEST, STATUS_FORBIDDEN, STATUS_INTERNAL_ERROR,
 };
 use crate::tunnel::transport::{jwt_token_to_tunnel, tunnel_to_jwt_token};
 use anyhow::anyhow;
@@ -68,6 +68,7 @@ fn extract_restrict_path_prefix(connection: &quinn::Connection) -> Option<String
 async fn handle_quic_stream(
     server: WsServer<impl TokioExecutorRef>,
     restrictions: Arc<RestrictionsRules>,
+    datagram_hub: Arc<crate::tunnel::transport::quic::QuicDatagramHub>,
     restrict_path_prefix: Option<String>,
     client_addr: SocketAddr,
     mut send: quinn::SendStream,
@@ -114,6 +115,22 @@ async fn handle_quic_stream(
         }
     };
 
+    if header.transport_mode == QuicTransportMode::Datagram
+        && !matches!(
+            remote.protocol,
+            crate::tunnel::LocalProtocol::Udp { .. } | crate::tunnel::LocalProtocol::ReverseUdp { .. }
+        )
+    {
+        warn!("Rejecting QUIC datagram tunnel for non-UDP protocol from {client_addr}");
+        send_err(
+            &mut send,
+            STATUS_BAD_REQUEST,
+            "QUIC datagram transport is only supported for UDP tunnels",
+        )
+        .await;
+        return;
+    }
+
     // Authorization: prefer the dedicated field, fall back to a custom header named "authorization".
     let authorization: Option<String> = header.authorization.clone().or_else(|| {
         header
@@ -147,6 +164,19 @@ async fn handle_quic_stream(
     };
     let (remote_addr, local_rx, local_tx) = tunnel;
 
+    let datagram_flow = if header.transport_mode == QuicTransportMode::Datagram {
+        match datagram_hub.register_flow(header.flow_id) {
+            Ok(flow) => Some(flow),
+            Err(err) => {
+                warn!("Rejecting QUIC datagram tunnel for {client_addr}: {err}");
+                send_err(&mut send, STATUS_BAD_REQUEST, format!("bad datagram flow: {err}")).await;
+                return;
+            }
+        }
+    } else {
+        None
+    };
+
     let cookie = if needs_cookie {
         tunnel_to_jwt_token(Uuid::from_u128(0), &remote_addr)
     } else {
@@ -160,8 +190,16 @@ async fn handle_quic_stream(
 
     info!("QUIC connected to {:?} {}:{}", req_protocol, remote_addr.host, remote_addr.port);
 
-    let ws_rx = QuicTunnelRead::new(recv);
-    let ws_tx = QuicTunnelWrite::new(send);
+    let (ws_rx, ws_tx) = if let Some((rx, tx)) = datagram_flow {
+        let _ = send.finish();
+        drop(recv);
+        (QuicTunnelRead::Datagram(rx), QuicTunnelWrite::Datagram(tx))
+    } else {
+        (
+            QuicTunnelRead::Stream(QuicStreamTunnelRead::new(recv)),
+            QuicTunnelWrite::Stream(QuicStreamTunnelWrite::new(send)),
+        )
+    };
 
     let (close_tx, close_rx) = oneshot::channel::<()>();
     let executor = server.executor.clone();
@@ -217,6 +255,8 @@ pub(super) async fn quic_server_serve<E: TokioExecutorRef>(
 
             let client_addr = connection.remote_address();
             info!("QUIC connection established from {client_addr}");
+            let datagram_hub = crate::tunnel::transport::quic::QuicDatagramHub::new(connection.clone());
+            server.executor.clone().spawn(datagram_hub.clone().run());
             let restrict_path_prefix = extract_restrict_path_prefix(&connection);
 
             // Accept multiplexed bi-directional streams from this connection.
@@ -238,6 +278,7 @@ pub(super) async fn quic_server_serve<E: TokioExecutorRef>(
                 let (send, recv) = stream;
                 let server = server.clone();
                 let restrictions = restrictions.load().clone();
+                let datagram_hub = datagram_hub.clone();
                 let restrict_path_prefix = restrict_path_prefix.clone();
 
                 let request_id = Uuid::now_v7();
@@ -245,8 +286,16 @@ pub(super) async fn quic_server_serve<E: TokioExecutorRef>(
                 span.record("id", request_id.to_string());
 
                 server.executor.clone().spawn(
-                    handle_quic_stream(server.clone(), restrictions, restrict_path_prefix, client_addr, send, recv)
-                        .instrument(span),
+                    handle_quic_stream(
+                        server.clone(),
+                        restrictions,
+                        datagram_hub,
+                        restrict_path_prefix,
+                        client_addr,
+                        send,
+                        recv,
+                    )
+                    .instrument(span),
                 );
             }
         });

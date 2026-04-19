@@ -15,6 +15,8 @@ use crate::tunnel::RemoteAddr;
 #[cfg(feature = "quic")]
 use crate::tunnel::client::TlsClientConfig;
 use crate::tunnel::client::{WsClient, WsClientConfig};
+#[cfg(feature = "quic")]
+use crate::tunnel::connectors::UdpTunnelConnector;
 use crate::tunnel::listeners::{TcpTunnelListener, UdpTunnelListener};
 #[cfg(feature = "quic")]
 use crate::tunnel::server::TlsServerConfig;
@@ -146,6 +148,8 @@ const ENDPOINT_LISTEN: (SocketAddr, Host) = (
 const QUIC_SERVER_TCP_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 18080));
 #[cfg(feature = "quic")]
 const QUIC_SERVER_UDP_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 18443));
+#[cfg(feature = "quic")]
+const QUIC_REVERSE_UDP_BIND: SocketAddr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 19998));
 
 #[cfg(feature = "quic")]
 fn server_quic(dns_resolver: DnsResolver, tls: TlsServerConfig) -> WsServer {
@@ -405,6 +409,115 @@ async fn test_tcp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: 
 
     dd.write_all(b"world!").await.unwrap();
     client.read_buf(&mut buf).await.unwrap();
+    assert_eq!(&buf[..6], b"world!");
+}
+
+#[cfg(feature = "quic")]
+#[rstest]
+#[timeout(Duration::from_secs(10))]
+#[tokio::test]
+#[serial]
+async fn test_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
+    let server_h = tokio::spawn(server_quic(dns_resolver.clone(), quic_server_tls(None)).serve(no_restrictions));
+    defer! { server_h.abort(); };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let client_quic = client_quic(dns_resolver.clone(), 1, "wstunnel", None, None).await;
+
+    let server = UdpTunnelListener::new(TUNNEL_LISTEN.0, (ENDPOINT_LISTEN.1.clone(), ENDPOINT_LISTEN.0.port()), None)
+        .await
+        .unwrap();
+    tokio::spawn(async move {
+        client_quic.run_tunnel(server).await.unwrap();
+    });
+
+    let udp_listener = protocols::udp::run_server(ENDPOINT_LISTEN.0, None, |_| Ok(()), |s| Ok(s.clone()))
+        .await
+        .unwrap();
+    let mut client = protocols::udp::connect(
+        &TUNNEL_LISTEN.1,
+        TUNNEL_LISTEN.0.port(),
+        Duration::from_secs(10),
+        SoMark::new(None),
+        &dns_resolver,
+    )
+    .await
+    .unwrap();
+
+    client.write_all(b"Hello").await.unwrap();
+    pin!(udp_listener);
+    let dd = udp_listener.next().await.unwrap().unwrap();
+    pin!(dd);
+    let mut buf = BytesMut::new();
+    dd.read_buf(&mut buf).await.unwrap();
+    assert_eq!(&buf[..5], b"Hello");
+    buf.clear();
+
+    dd.writer().write_all(b"world!").await.unwrap();
+    client.read_buf(&mut buf).await.unwrap();
+    assert_eq!(&buf[..6], b"world!");
+}
+
+#[cfg(feature = "quic")]
+#[rstest]
+#[timeout(Duration::from_secs(10))]
+#[tokio::test]
+#[serial]
+async fn test_reverse_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
+    let server_h = tokio::spawn(server_quic(dns_resolver.clone(), quic_server_tls(None)).serve(no_restrictions));
+    defer! { server_h.abort(); };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let client_quic = client_quic(dns_resolver.clone(), 1, "wstunnel", None, None).await;
+
+    let reverse_remote = RemoteAddr {
+        protocol: LocalProtocol::ReverseUdp { timeout: None },
+        host: Host::Ipv4("127.0.0.1".parse().unwrap()),
+        port: QUIC_REVERSE_UDP_BIND.port(),
+    };
+    let connector_dns_resolver = dns_resolver.clone();
+    tokio::spawn(async move {
+        let connector = UdpTunnelConnector::new(
+            &ENDPOINT_LISTEN.1,
+            ENDPOINT_LISTEN.0.port(),
+            SoMark::new(None),
+            Duration::from_secs(10),
+            &connector_dns_resolver,
+        );
+        client_quic.run_reverse_tunnel(reverse_remote, connector).await.unwrap();
+    });
+
+    let udp_listener = protocols::udp::run_server(ENDPOINT_LISTEN.0, None, |_| Ok(()), |s| Ok(s.clone()))
+        .await
+        .unwrap();
+    let mut reverse_client = protocols::udp::connect(
+        &Host::Ipv4("127.0.0.1".parse().unwrap()),
+        QUIC_REVERSE_UDP_BIND.port(),
+        Duration::from_secs(10),
+        SoMark::new(None),
+        &dns_resolver,
+    )
+    .await
+    .unwrap();
+
+    let mut reverse_sender = reverse_client.clone();
+    let sender_task = tokio::spawn(async move {
+        loop {
+            let _ = reverse_sender.write_all(b"Hello").await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+    pin!(udp_listener);
+    let dd = udp_listener.next().await.unwrap().unwrap();
+    sender_task.abort();
+    pin!(dd);
+    let mut buf = BytesMut::new();
+    dd.read_buf(&mut buf).await.unwrap();
+    assert_eq!(&buf[..5], b"Hello");
+    buf.clear();
+
+    dd.writer().write_all(b"world!").await.unwrap();
+    reverse_client.read_buf(&mut buf).await.unwrap();
     assert_eq!(&buf[..6], b"world!");
 }
 

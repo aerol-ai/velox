@@ -5,7 +5,7 @@ pub(crate) mod handler_quic;
 mod handler_websocket;
 mod reverse_tunnel;
 mod server;
-mod utils;
+pub(crate) mod utils;
 
 pub use server::TlsServerConfig;
 pub use server::WsServer;

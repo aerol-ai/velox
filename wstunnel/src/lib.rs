@@ -6,6 +6,8 @@ mod restrictions;
 mod somark;
 #[cfg(test)]
 mod test_integrations;
+#[cfg(test)]
+mod tests_unit;
 pub mod tunnel;
 
 use crate::config::{Client, DEFAULT_CLIENT_UPGRADE_PATH_PREFIX, Server};

@@ -31,7 +31,7 @@ pub(super) fn bad_request() -> HttpResponse {
 /// Checks if the requested (remote) port has been mapped in the configuration to another port.
 /// If it is not mapped the original port number is returned.
 #[inline]
-pub(super) fn find_mapped_port(req_port: u16, restriction: &RestrictionConfig) -> u16 {
+pub(crate) fn find_mapped_port(req_port: u16, restriction: &RestrictionConfig) -> u16 {
     // Determine if the requested port is to be mapped to a different port.
     let remote_port = restriction
         .allow
@@ -68,7 +68,7 @@ pub(super) fn extract_x_forwarded_for(req: &Request<Incoming>) -> Option<(IpAddr
 }
 
 #[inline]
-pub(super) fn extract_path_prefix(path: &str) -> Result<&str, PathPrefixErr> {
+pub(crate) fn extract_path_prefix(path: &str) -> Result<&str, PathPrefixErr> {
     if !path.starts_with('/') {
         return Err(PathPrefixErr::BadPathPrefix);
     }
@@ -83,7 +83,7 @@ pub(super) fn extract_path_prefix(path: &str) -> Result<&str, PathPrefixErr> {
 
 #[derive(Debug, Display, Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
-pub(super) enum PathPrefixErr {
+pub(crate) enum PathPrefixErr {
     #[display("bad path prefix in upgrade request")]
     BadPathPrefix,
     #[display("bad upgrade request")]
@@ -113,7 +113,7 @@ pub(super) fn extract_tunnel_info(req: &Request<Incoming>) -> anyhow::Result<Tok
 impl RestrictionConfig {
     /// Returns true if the parameters match the restriction config
     #[inline]
-    fn filter(self: &RestrictionConfig, path_prefix: &str, authorization_header_val: Option<&str>) -> bool {
+    pub(crate) fn filter(self: &RestrictionConfig, path_prefix: &str, authorization_header_val: Option<&str>) -> bool {
         self.r#match.iter().all(|m| match m {
             MatchConfig::Any => true,
             MatchConfig::PathPrefix(path) => path.is_match(path_prefix),
@@ -124,7 +124,7 @@ impl RestrictionConfig {
 
 impl AllowReverseTunnelConfig {
     #[inline]
-    fn is_allowed(&self, remote: &RemoteAddr) -> bool {
+    pub(crate) fn is_allowed(&self, remote: &RemoteAddr) -> bool {
         if !remote.protocol.is_reverse_tunnel() {
             return false;
         }
@@ -158,7 +158,7 @@ impl AllowReverseTunnelConfig {
 
 impl AllowTunnelConfig {
     #[inline]
-    fn is_allowed(&self, remote: &RemoteAddr) -> bool {
+    pub(crate) fn is_allowed(&self, remote: &RemoteAddr) -> bool {
         if remote.protocol.is_reverse_tunnel() {
             return false;
         }
@@ -181,7 +181,7 @@ impl AllowTunnelConfig {
 
 impl AllowConfig {
     #[inline]
-    fn is_allowed(&self, remote: &RemoteAddr) -> bool {
+    pub(crate) fn is_allowed(&self, remote: &RemoteAddr) -> bool {
         match self {
             AllowConfig::ReverseTunnel(config) => config.is_allowed(remote),
             AllowConfig::Tunnel(config) => config.is_allowed(remote),
@@ -198,7 +198,7 @@ impl AllowConfig {
 /// * `Some(restriction)` - Tunnel is allowed. Encapsulates the restriction that allowed the tunnel.
 /// * `None` - Tunnel is not allowed.
 #[inline]
-pub(super) fn validate_tunnel<'a>(
+pub(crate) fn validate_tunnel<'a>(
     remote: &RemoteAddr,
     path_prefix: &str,
     authorization: Option<&str>,

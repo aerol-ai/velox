@@ -517,7 +517,7 @@ pub struct LocalToRemote {
 }
 
 #[cfg(feature = "clap")]
-mod parsers {
+pub(crate) mod parsers {
     use super::LocalToRemote;
     use crate::tunnel::LocalProtocol;
     use crate::tunnel::transport::TransportScheme;

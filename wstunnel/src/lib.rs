@@ -466,18 +466,18 @@ async fn create_client_tunnels(
     Ok(tunnels)
 }
 
-pub async fn run_server(args: Server, executor: impl TokioExecutor) -> anyhow::Result<()> {
+pub async fn run_server(args: Server, executor: impl TokioExecutor, shutdown: tokio_util::sync::CancellationToken) -> anyhow::Result<()> {
     let (tx, rx) = oneshot::channel();
     let exec = executor.ref_clone();
     executor.spawn(async move {
-        let ret = run_server_impl(args, exec).await;
+        let ret = run_server_impl(args, exec, shutdown).await;
         let _ = tx.send(ret);
     });
 
     rx.await?
 }
 
-async fn run_server_impl(args: Server, executor: impl TokioExecutorRef) -> anyhow::Result<()> {
+async fn run_server_impl(args: Server, executor: impl TokioExecutorRef, shutdown: tokio_util::sync::CancellationToken) -> anyhow::Result<()> {
     // `quic://` on the server URL is ambiguous: the main URL drives the TCP/TLS listener, and
     // QUIC is enabled separately via `--quic-bind`. Reject up front with a clear message instead
     // of silently binding a plaintext TCP listener.
@@ -587,7 +587,7 @@ async fn run_server_impl(args: Server, executor: impl TokioExecutorRef) -> anyho
         server.config
     );
     debug!("Restriction rules: {restrictions:#?}");
-    server.serve(restrictions).await
+    server.serve(restrictions, shutdown).await
 }
 
 fn mk_http_proxy(

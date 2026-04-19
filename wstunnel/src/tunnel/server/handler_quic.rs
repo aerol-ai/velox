@@ -87,6 +87,7 @@ async fn handle_quic_stream(
     client_addr: SocketAddr,
     mut send: quinn::SendStream,
     mut recv: quinn::RecvStream,
+    shutdown: tokio_util::sync::CancellationToken,
 ) {
     let header = match QuicRequestHeader::read(&mut recv).await {
         Ok(h) => h,
@@ -168,7 +169,7 @@ async fn handle_quic_stream(
     let req_protocol = remote.protocol.clone();
     let needs_cookie = req_protocol.is_dynamic_reverse_tunnel();
 
-    let tunnel = match server.exec_tunnel(&restriction, remote, client_addr).await {
+    let tunnel = match server.exec_tunnel(&restriction, remote, client_addr, shutdown).await {
         Ok(t) => t,
         Err(err) => {
             warn!("Failed to exec QUIC tunnel for {client_addr}: {err}");
@@ -231,6 +232,7 @@ pub(super) async fn quic_server_serve<E: TokioExecutorRef>(
     endpoint: quinn::Endpoint,
     tls_reloader: Arc<crate::tunnel::tls_reloader::TlsReloader>,
     restrictions: Arc<ArcSwap<RestrictionsRules>>,
+    shutdown: tokio_util::sync::CancellationToken,
 ) {
     info!("QUIC server listening on {:?}", endpoint.local_addr());
 
@@ -248,13 +250,24 @@ pub(super) async fn quic_server_serve<E: TokioExecutorRef>(
             }
         }
 
-        let Some(incoming) = endpoint.accept().await else {
+        let accept_res = tokio::select! {
+            res = endpoint.accept() => res,
+            _ = shutdown.cancelled() => {
+                info!("QUIC server draining");
+                endpoint.close(0u32.into(), b"shutdown");
+                endpoint.wait_idle().await;
+                break;
+            }
+        };
+
+        let Some(incoming) = accept_res else {
             info!("QUIC endpoint closed, stopping accept loop");
             break;
         };
 
         let server = server.clone();
         let restrictions = restrictions.clone();
+        let shutdown_for_conn = shutdown.clone();
 
         server.executor.clone().spawn(async move {
             let connection = match incoming.await {
@@ -292,6 +305,7 @@ pub(super) async fn quic_server_serve<E: TokioExecutorRef>(
                 let restrictions = restrictions.load().clone();
                 let datagram_hub = datagram_hub.clone();
                 let restrict_path_prefix = restrict_path_prefix.clone();
+                let shutdown = shutdown_for_conn.clone();
 
                 let request_id = Uuid::now_v7();
                 let span = mk_quic_span();
@@ -306,6 +320,7 @@ pub(super) async fn quic_server_serve<E: TokioExecutorRef>(
                         client_addr,
                         send,
                         recv,
+                        shutdown,
                     )
                     .instrument(span),
                 );

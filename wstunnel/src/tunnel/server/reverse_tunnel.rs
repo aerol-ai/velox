@@ -55,6 +55,7 @@ impl<T: TunnelListener> ReverseTunnelServer<T> {
         bind_addr: SocketAddr,
         idle_timeout: Duration,
         gen_listening_server: impl Future<Output = anyhow::Result<T>>,
+        shutdown: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<((<T as TunnelListener>::Reader, <T as TunnelListener>::Writer), RemoteAddr)>
     where
         T: TunnelListener + Send + 'static,
@@ -108,6 +109,10 @@ impl<T: TunnelListener> ReverseTunnelServer<T> {
                                 break;
                             }
                         },
+                        _ = shutdown.cancelled() => {
+                            info!("Reverse tunnel server shutdown requested");
+                            break;
+                        }
                     }
                 }
                 info!("Stopping listening reverse server");

@@ -319,7 +319,7 @@ async fn test_tcp_tunnel(
     no_restrictions: RestrictionsRules,
     dns_resolver: DnsResolver,
 ) {
-    let server_h = tokio::spawn(server_no_tls.serve(no_restrictions));
+    let server_h = tokio::spawn(server_no_tls.serve(no_restrictions, tokio_util::sync::CancellationToken::new()));
     defer! { server_h.abort(); };
 
     let client_ws = client_ws.await;
@@ -364,7 +364,7 @@ async fn test_udp_tunnel(
     no_restrictions: RestrictionsRules,
     dns_resolver: DnsResolver,
 ) {
-    let server_h = tokio::spawn(server_no_tls.serve(no_restrictions));
+    let server_h = tokio::spawn(server_no_tls.serve(no_restrictions, tokio_util::sync::CancellationToken::new()));
     defer! { server_h.abort(); };
 
     let client_ws = client_ws.await;
@@ -409,7 +409,7 @@ async fn test_udp_tunnel(
 #[tokio::test]
 #[serial]
 async fn test_tcp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
-    let server_h = tokio::spawn(server_quic(dns_resolver.clone(), quic_server_tls(None)).serve(no_restrictions));
+    let server_h = tokio::spawn(server_quic(dns_resolver.clone(), quic_server_tls(None)).serve(no_restrictions, tokio_util::sync::CancellationToken::new()));
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -451,7 +451,7 @@ async fn test_tcp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: 
 #[tokio::test]
 #[serial]
 async fn test_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
-    let server_h = tokio::spawn(server_quic(dns_resolver.clone(), quic_server_tls(None)).serve(no_restrictions));
+    let server_h = tokio::spawn(server_quic(dns_resolver.clone(), quic_server_tls(None)).serve(no_restrictions, tokio_util::sync::CancellationToken::new()));
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -497,7 +497,7 @@ async fn test_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: 
 #[tokio::test]
 #[serial]
 async fn test_reverse_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
-    let server_h = tokio::spawn(server_quic(dns_resolver.clone(), quic_server_tls(None)).serve(no_restrictions));
+    let server_h = tokio::spawn(server_quic(dns_resolver.clone(), quic_server_tls(None)).serve(no_restrictions, tokio_util::sync::CancellationToken::new()));
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -562,7 +562,7 @@ async fn test_reverse_udp_tunnel_quic(no_restrictions: RestrictionsRules, dns_re
 async fn test_quic_mtls_rejects_wrong_path_prefix(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
     let (client_certificate, client_key, client_ca_certificates) = build_client_mtls_material("expected-quic-cn");
     let server_h = tokio::spawn(
-        server_quic(dns_resolver.clone(), quic_server_tls(Some(client_ca_certificates))).serve(no_restrictions),
+        server_quic(dns_resolver.clone(), quic_server_tls(Some(client_ca_certificates))).serve(no_restrictions, tokio_util::sync::CancellationToken::new()),
     );
     defer! { server_h.abort(); };
 
@@ -592,7 +592,7 @@ async fn test_quic_mtls_rejects_wrong_path_prefix(no_restrictions: RestrictionsR
 //    no_restrictions: RestrictionsRules,
 //    dns_resolver: DnsResolver,
 //) {
-//    let server_h = tokio::spawn(server_no_tls.serve(no_restrictions));
+//    let server_h = tokio::spawn(server_no_tls.serve(no_restrictions, tokio_util::sync::CancellationToken::new()));
 //    defer! { server_h.abort(); };
 //
 //    let client_ws = client_ws.await;
@@ -643,7 +643,7 @@ async fn test_tcp_tunnel_quic_0rtt(no_restrictions: RestrictionsRules, dns_resol
         quic_disable_migration: false,
     };
     let srv_conf = WsServer::new(server_config, DefaultTokioExecutor::default());
-    let server_h = tokio::spawn(srv_conf.serve(no_restrictions));
+    let server_h = tokio::spawn(srv_conf.serve(no_restrictions, tokio_util::sync::CancellationToken::new()));
     defer! { server_h.abort(); };
 
     tokio::time::sleep(Duration::from_millis(100)).await;

@@ -101,11 +101,40 @@ async fn main() -> anyhow::Result<()> {
                 });
         }
         Commands::Server(args) => {
-            run_server(*args, DefaultTokioExecutor::default())
-                .await
-                .unwrap_or_else(|err| {
+            let shutdown = tokio_util::sync::CancellationToken::new();
+            let shutdown_clone = shutdown.clone();
+
+            tokio::spawn(async move {
+                #[cfg(unix)]
+                let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).unwrap();
+                
+                #[cfg(unix)]
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {},
+                    _ = sigterm.recv() => {},
+                }
+
+                #[cfg(not(unix))]
+                let _ = tokio::signal::ctrl_c().await;
+
+                tracing::info!("Received shutdown signal, gracefully waiting up to 30s for tunnels to drain...");
+                shutdown_clone.cancel();
+            });
+
+            let executor = DefaultTokioExecutor::default();
+            let executor_clone = executor.clone();
+
+            let serve_fut = async move {
+                if let Err(err) = run_server(*args, executor_clone.clone(), shutdown.clone()).await {
                     panic!("Cannot start wstunnel server: {err:?}");
-                });
+                }
+                executor_clone.wait().await;
+            };
+
+            match tokio::time::timeout(std::time::Duration::from_secs(30), serve_fut).await {
+                Ok(_) => tracing::info!("Graceful shutdown complete."),
+                Err(_) => tracing::warn!("Graceful shutdown timed out after 30s. Forcefully exiting."),
+            }
         }
     }
 

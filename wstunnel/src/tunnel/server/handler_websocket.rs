@@ -21,6 +21,7 @@ pub(super) async fn ws_server_upgrade(
     restrict_path_prefix: Option<String>,
     client_addr: SocketAddr,
     mut req: Request<Incoming>,
+    shutdown: tokio_util::sync::CancellationToken,
 ) -> HttpResponse {
     if !fastwebsockets::upgrade::is_upgrade_request(&req) {
         warn!("Rejecting connection with bad upgrade request: {}", req.uri());
@@ -29,7 +30,7 @@ pub(super) async fn ws_server_upgrade(
 
     let mask_frame = server.config.websocket_mask_frame;
     let (remote_addr, local_rx, local_tx, need_cookie) = match server
-        .handle_tunnel_request(restrictions, restrict_path_prefix, client_addr, &req)
+        .handle_tunnel_request(restrictions, restrict_path_prefix, client_addr, &req, shutdown)
         .await
     {
         Ok(ret) => ret,

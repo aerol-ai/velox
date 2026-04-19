@@ -100,6 +100,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         restrict_path_prefix: Option<String>,
         mut client_addr: SocketAddr,
         req: &Request<Incoming>,
+        shutdown: tokio_util::sync::CancellationToken,
     ) -> Result<
         (
             RemoteAddr,
@@ -151,7 +152,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         let req_protocol = remote.protocol.clone();
         let inject_cookie = req_protocol.is_dynamic_reverse_tunnel();
         let tunnel = self
-            .exec_tunnel(restriction, remote, client_addr)
+            .exec_tunnel(restriction, remote, client_addr, shutdown)
             .await
             .map_err(|err| {
                 warn!("Rejecting connection with bad upgrade request: {err} {}", req.uri());
@@ -168,6 +169,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         restriction: &RestrictionConfig,
         remote: RemoteAddr,
         client_address: SocketAddr,
+        shutdown: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<(RemoteAddr, Pin<Box<dyn AsyncRead + Send>>, Pin<Box<dyn AsyncWrite + Send>>)> {
         match remote.protocol {
             LocalProtocol::Udp { timeout, .. } => {
@@ -224,6 +226,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                         bind,
                         self.config.remote_server_idle_timeout,
                         listening_server,
+                        shutdown.clone(),
                     )
                     .await?;
 
@@ -243,6 +246,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                         bind,
                         self.config.remote_server_idle_timeout,
                         listening_server,
+                        shutdown.clone(),
                     )
                     .await?;
                 Ok((remote, Box::pin(local_rx), Box::pin(local_tx)))
@@ -261,6 +265,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                         bind,
                         self.config.remote_server_idle_timeout,
                         listening_server,
+                        shutdown.clone(),
                     )
                     .await?;
 
@@ -280,6 +285,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                         bind,
                         self.config.remote_server_idle_timeout,
                         listening_server,
+                        shutdown.clone(),
                     )
                     .await?;
 
@@ -307,6 +313,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                         bind,
                         self.config.remote_server_idle_timeout,
                         listening_server,
+                        shutdown.clone(),
                     )
                     .await?;
 
@@ -339,14 +346,15 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         Ok(endpoint)
     }
 
-    pub async fn serve(self, restrictions: RestrictionsRules) -> anyhow::Result<()> {
+    pub async fn serve(self, restrictions: RestrictionsRules, shutdown: tokio_util::sync::CancellationToken) -> anyhow::Result<()> {
         info!("Starting wstunnel server listening on {}", self.config.bind);
 
         // setup upgrade request handler
         let mk_websocket_upgrade_fn = |server: WsServer<_>,
                                        restrictions: Arc<ArcSwap<RestrictionsRules>>,
                                        restrict_path: Option<String>,
-                                       client_addr: SocketAddr| {
+                                       client_addr: SocketAddr,
+                                       shutdown: tokio_util::sync::CancellationToken| {
             move |req: Request<Incoming>| {
                 ws_server_upgrade(
                     server.clone(),
@@ -354,6 +362,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                     restrict_path.clone(),
                     client_addr,
                     req,
+                    shutdown.clone(),
                 )
                 .map::<anyhow::Result<_>, _>(Ok)
                 .instrument(mk_span())
@@ -363,7 +372,8 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         let mk_http_upgrade_fn = |server: WsServer<_>,
                                   restrictions: Arc<ArcSwap<RestrictionsRules>>,
                                   restrict_path: Option<String>,
-                                  client_addr: SocketAddr| {
+                                  client_addr: SocketAddr,
+                                  shutdown: tokio_util::sync::CancellationToken| {
             move |req: Request<Incoming>| {
                 http_server_upgrade(
                     server.clone(),
@@ -371,6 +381,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                     restrict_path.clone(),
                     client_addr,
                     req,
+                    shutdown.clone(),
                 )
                 .map::<anyhow::Result<_>, _>(Ok)
                 .instrument(mk_span())
@@ -380,14 +391,16 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         let mk_auto_upgrade_fn = |server: WsServer<_>,
                                   restrictions: Arc<ArcSwap<RestrictionsRules>>,
                                   restrict_path: Option<String>,
-                                  client_addr: SocketAddr| {
+                                  client_addr: SocketAddr,
+                                  shutdown: tokio_util::sync::CancellationToken| {
             move |req: Request<Incoming>| {
                 let server = server.clone();
                 let restrictions = restrictions.clone();
                 let restrict_path = restrict_path.clone();
+                let shutdown = shutdown.clone();
                 async move {
                     if fastwebsockets::upgrade::is_upgrade_request(&req) {
-                        ws_server_upgrade(server.clone(), restrictions.load().clone(), restrict_path, client_addr, req)
+                        ws_server_upgrade(server.clone(), restrictions.load().clone(), restrict_path, client_addr, req, shutdown)
                             .map::<anyhow::Result<_>, _>(Ok)
                             .await
                     } else if req.version() == Version::HTTP_2 {
@@ -397,6 +410,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                             restrict_path.clone(),
                             client_addr,
                             req,
+                            shutdown,
                         )
                         .map::<anyhow::Result<_>, _>(Ok)
                         .await
@@ -435,6 +449,8 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
             .await
             .with_context(|| format!("Failed to bind to socket on {}", self.config.bind))?;
 
+        #[cfg(feature = "quic")]
+        let mut _quic_handle = None;
         // Spawn QUIC listener if configured
         #[cfg(feature = "quic")]
         {
@@ -444,17 +460,26 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                 let quic_server = self.clone();
                 let quic_restrictions = restrictions.restrictions_rules().clone();
                 let quic_reloader = tls_reloader.clone();
-                self.executor.spawn(handler_quic::quic_server_serve(
+                _quic_handle = Some(self.executor.spawn_tracked(handler_quic::quic_server_serve(
                     quic_server,
                     quic_endpoint,
                     quic_reloader,
                     quic_restrictions,
-                ));
+                    shutdown.clone(),
+                )));
             }
         }
 
         loop {
-            let (stream, peer_addr) = match listener.accept().await {
+            let accept_res = tokio::select! {
+                res = listener.accept() => res,
+                _ = shutdown.cancelled() => {
+                    info!("Server shutdown requested, stopping TCP accept loop");
+                    break;
+                }
+            };
+
+            let (stream, peer_addr) = match accept_res {
                 Ok(ret) => ret,
                 Err(err) => {
                     warn!("Error while accepting connection {:?}", err);
@@ -470,6 +495,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
 
             let server = self.clone();
             let restrictions = restrictions.restrictions_rules().clone();
+            let shutdown_for_conn = shutdown.clone();
 
             // Check if we need to enable TLS or not
             match tls_context.as_mut() {
@@ -502,7 +528,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                                 }
 
                                 let http_upgrade_fn =
-                                    mk_http_upgrade_fn(server, restrictions, restrict_path, peer_addr);
+                                    mk_http_upgrade_fn(server, restrictions, restrict_path, peer_addr, shutdown_for_conn.clone());
                                 let con_fut = conn_builder.serve_connection(tls_stream, service_fn(http_upgrade_fn));
                                 if let Err(e) = con_fut.await {
                                     error!("Error while upgrading cnx to http: {:?}", e);
@@ -511,7 +537,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                             // websocket
                             _ => {
                                 let websocket_upgrade_fn =
-                                    mk_websocket_upgrade_fn(server, restrictions, restrict_path, peer_addr);
+                                    mk_websocket_upgrade_fn(server, restrictions, restrict_path, peer_addr, shutdown_for_conn.clone());
                                 let conn_fut = http1::Builder::new()
                                     .timer(TokioTimer::new())
                                     // https://github.com/erebe/wstunnel/issues/358
@@ -539,7 +565,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                             conn_fut.http2().keep_alive_interval(ping);
                         }
 
-                        let websocket_upgrade_fn = mk_auto_upgrade_fn(server, restrictions, None, peer_addr);
+                        let websocket_upgrade_fn = mk_auto_upgrade_fn(server, restrictions, None, peer_addr, shutdown_for_conn);
                         let upgradable =
                             conn_fut.serve_connection_with_upgrades(stream, service_fn(websocket_upgrade_fn));
 
@@ -553,6 +579,15 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                 }
             }
         }
+
+        #[cfg(feature = "quic")]
+        if let Some(handle) = _quic_handle {
+            if let Err(e) = handle.await {
+                error!("QUIC server task error: {:?}", e);
+            }
+        }
+
+        Ok(())
     }
 }
 

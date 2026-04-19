@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Velox — Tunnel anything. Bypass everything.</title>
+<title>Velox - Tunnel anything. Bypass everything.</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="description" content="Velox tunnels TCP, UDP, and Unix traffic over WebSocket, HTTP/2, or QUIC to bypass firewalls and proxies. Single static binary, no dependencies." />
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,13 +15,13 @@
 <!-- ===== NAV ===== -->
 <nav class="nav">
   <div class="nav-inner">
-    <a href="#" class="logo">velox</a>
+    <a href="#" class="logo">Velox</a>
     <div class="nav-links">
       <a href="#how-it-works">How it works</a>
       <a href="#transports">Transports</a>
       <a href="#features">Features</a>
       <a href="#quickstart">Quick start</a>
-      <a href="https://github.com/aerol-ai/velox" target="_blank" rel="noopener" class="nav-gh">
+      <a href="https://github.com/aerol-ai/Velox" target="_blank" rel="noopener" class="nav-gh">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
         GitHub
       </a>
@@ -34,7 +34,7 @@
   <div class="hero-inner">
     <div class="hero-badge">
       <span class="badge-dot"></span>
-      <span>aerol.ai / velox</span>
+      <span>aerol.ai / Velox</span>
       <span class="badge-sep">&middot;</span>
       <span>Rust &middot; single binary</span>
     </div>
@@ -47,21 +47,21 @@
     </p>
 
     <div class="hero-ctas">
-      <a href="https://github.com/aerol-ai/velox/releases" class="btn-primary" target="_blank" rel="noopener">Download binary</a>
+      <a href="https://github.com/aerol-ai/Velox/releases" class="btn-primary" target="_blank" rel="noopener">Download binary</a>
       <a href="#quickstart" class="btn-ghost">Quick start &rarr;</a>
     </div>
 
     <div class="hero-term">
       <div class="term-bar">
         <div class="term-dots"><i class="dot-r"></i><i class="dot-y"></i><i class="dot-g"></i></div>
-        <span class="term-title">velox client</span>
+        <span class="term-title">Velox client</span>
         <span class="term-status"><span class="status-ok">&#9679; connected</span></span>
       </div>
       <div class="term-body">
-        <div class="term-line"><span class="t-dim">$</span> <span class="t-ink">velox client</span> <span class="t-flag">-L</span> <span class="t-val">socks5://127.0.0.1:8888</span> <span class="t-flag">-p</span> <span class="t-val">http://corp-proxy:8080</span> <span class="t-val">wss://myserver.com:443</span></div>
-        <div class="term-line"><span class="t-ts">14:02:17</span> <span class="t-ok"> INFO</span> <span class="t-dim">velox::tls       </span> <span class="t-ink">TLS handshake complete</span> <span class="t-key">sni</span>=<span class="t-val">myserver.com</span></div>
-        <div class="term-line"><span class="t-ts">14:02:17</span> <span class="t-ok"> INFO</span> <span class="t-dim">velox::tunnel    </span> <span class="t-ink">Listening</span> <span class="t-key">addr</span>=<span class="t-val">127.0.0.1:8888</span> <span class="t-key">proto</span>=<span class="t-brand">socks5</span></div>
-        <div class="term-line"><span class="t-ts">14:02:19</span> <span class="t-ok"> INFO</span> <span class="t-dim">velox::tunnel    </span> <span class="t-ink">New tunnel</span> <span class="t-key">dest</span>=<span class="t-val">api.github.com:443</span> <span class="t-key">bytes_rx</span>=<span class="t-ok">912k</span></div>
+        <div class="term-line"><span class="t-dim">$</span> <span class="t-ink">Velox client</span> <span class="t-flag">-L</span> <span class="t-val">socks5://127.0.0.1:8888</span> <span class="t-flag">-p</span> <span class="t-val">http://corp-proxy:8080</span> <span class="t-val">wss://myserver.com:443</span></div>
+        <div class="term-line"><span class="t-ts">14:02:17</span> <span class="t-ok"> INFO</span> <span class="t-dim">Velox::tls       </span> <span class="t-ink">TLS handshake complete</span> <span class="t-key">sni</span>=<span class="t-val">myserver.com</span></div>
+        <div class="term-line"><span class="t-ts">14:02:17</span> <span class="t-ok"> INFO</span> <span class="t-dim">Velox::tunnel    </span> <span class="t-ink">Listening</span> <span class="t-key">addr</span>=<span class="t-val">127.0.0.1:8888</span> <span class="t-key">proto</span>=<span class="t-brand">socks5</span></div>
+        <div class="term-line"><span class="t-ts">14:02:19</span> <span class="t-ok"> INFO</span> <span class="t-dim">Velox::tunnel    </span> <span class="t-ink">New tunnel</span> <span class="t-key">dest</span>=<span class="t-val">api.github.com:443</span> <span class="t-key">bytes_rx</span>=<span class="t-ok">912k</span></div>
         <div class="term-line term-cursor"><span class="t-brand">&#10095;</span> <span class="cursor-block"></span></div>
       </div>
     </div>
@@ -81,7 +81,7 @@
     <div class="arch-diagram">
       <div class="arch-node arch-client">
         <div class="arch-node-label">Your machine</div>
-        <div class="arch-node-name">velox client</div>
+        <div class="arch-node-name">Velox client</div>
         <div class="arch-node-sub">local socks5 / tcp / udp</div>
       </div>
       <div class="arch-arrow">
@@ -95,7 +95,7 @@
       </div>
       <div class="arch-node arch-server">
         <div class="arch-node-label">Your VPS</div>
-        <div class="arch-node-name">velox server</div>
+        <div class="arch-node-name">Velox server</div>
         <div class="arch-node-sub">wss://0.0.0.0:443</div>
       </div>
       <div class="arch-arrow arch-arrow-right">
@@ -113,13 +113,13 @@
       <div class="how-card">
         <div class="how-num">01</div>
         <h3>Start server on your VPS</h3>
-        <div class="code-block">velox server wss://[::]:443</div>
+        <div class="code-block">Velox server wss://[::]:443</div>
         <p>Single binary. Self-signed cert included. Bring your own cert for production.</p>
       </div>
       <div class="how-card">
         <div class="how-num">02</div>
         <h3>Connect from your machine</h3>
-        <div class="code-block">velox client -L socks5://127.0.0.1:8888 wss://yourserver:443</div>
+        <div class="code-block">Velox client -L socks5://127.0.0.1:8888 wss://yourserver:443</div>
         <p>Sets up a local SOCKS5 proxy. Point any app at it.</p>
       </div>
       <div class="how-card">
@@ -139,23 +139,24 @@
     <h2 class="section-title">Pick the right protocol for your situation.</h2>
     <p class="section-desc">All three transports tunnel the same traffic. The difference is how they look to a firewall.</p>
 
-    <div class="transport-table">
+    <div class="transport-table-scroll">
+      <div class="transport-table">
       <div class="tt-head">
         <div class="tt-row-label"></div>
         <div class="tt-col-head tt-col-quic">
           <span class="tt-name">QUIC</span>
           <span class="transport-badge">Lowest latency</span>
-          <div class="code-block" style="margin-top:12px;">velox client -L socks5://127.0.0.1:1080 <span class="t-brand">quic://</span>myserver:8443</div>
+          <div class="code-block">Velox client -L socks5://127.0.0.1:1080 <span class="t-brand">quic://</span>myserver:8443</div>
         </div>
         <div class="tt-col-head tt-col-ws">
           <span class="tt-name">WebSocket</span>
           <span class="transport-badge transport-default">Recommended</span>
-          <div class="code-block" style="margin-top:12px;">velox client -L socks5://127.0.0.1:1080 <span class="t-brand">wss://</span>myserver:443</div>
+          <div class="code-block">Velox client -L socks5://127.0.0.1:1080 <span class="t-brand">wss://</span>myserver:443</div>
         </div>
         <div class="tt-col-head tt-col-h2">
           <span class="tt-name">HTTP/2</span>
           <span class="transport-badge transport-fallback">Fallback</span>
-          <div class="code-block" style="margin-top:12px;">velox client -L socks5://127.0.0.1:1080 <span class="t-brand">https://</span>myserver:443</div>
+          <div class="code-block">Velox client -L socks5://127.0.0.1:1080 <span class="t-brand">https://</span>myserver:443</div>
         </div>
       </div>
 
@@ -172,31 +173,31 @@
         <div class="tt-cell"><span class="tt-val">Optional (https://)</span></div>
       </div>
       <div class="tt-row">
-        <div class="tt-row-label">Head-of-line blocking</div>
+        <div class="tt-row-label">HoL blocking</div>
         <div class="tt-cell"><span class="tt-val t-ok">None</span></div>
         <div class="tt-cell"><span class="tt-val t-warn">Yes (TCP)</span></div>
         <div class="tt-cell"><span class="tt-val t-warn">Yes (TCP)</span></div>
       </div>
       <div class="tt-row">
-        <div class="tt-row-label">Multiplexed streams</div>
+        <div class="tt-row-label">Multiplexed</div>
         <div class="tt-cell"><span class="tt-val t-ok">Yes &mdash; unlimited</span></div>
         <div class="tt-cell"><span class="tt-val t-warn">No &mdash; 1 per conn</span></div>
         <div class="tt-cell"><span class="tt-val t-ok">Yes</span></div>
       </div>
       <div class="tt-row">
-        <div class="tt-row-label">UDP native mode</div>
+        <div class="tt-row-label">UDP native</div>
         <div class="tt-cell"><span class="tt-val t-ok">DATAGRAM frames</span></div>
         <div class="tt-cell"><span class="tt-val t-warn">Over stream</span></div>
         <div class="tt-cell"><span class="tt-val t-warn">Over stream</span></div>
       </div>
       <div class="tt-row">
-        <div class="tt-row-label">CDN / reverse proxy</div>
+        <div class="tt-row-label">CDN / proxy</div>
         <div class="tt-cell"><span class="tt-val t-err">No &mdash; direct UDP</span></div>
         <div class="tt-cell"><span class="tt-val t-ok">Yes &mdash; Cloudflare etc.</span></div>
         <div class="tt-cell"><span class="tt-val t-err">No &mdash; buffers request</span></div>
       </div>
       <div class="tt-row">
-        <div class="tt-row-label">Corporate proxy</div>
+        <div class="tt-row-label">Corp proxy</div>
         <div class="tt-cell"><span class="tt-val t-err">No</span></div>
         <div class="tt-cell"><span class="tt-val t-ok">Yes</span></div>
         <div class="tt-cell"><span class="tt-val t-warn">Sometimes</span></div>
@@ -207,6 +208,7 @@
         <div class="tt-cell"><span class="tt-val">Browser proxy, anywhere</span></div>
         <div class="tt-cell"><span class="tt-val">WS blocked, direct path</span></div>
       </div>
+    </div>
     </div>
   </div>
 </section>
@@ -219,47 +221,47 @@
 
     <div class="features-grid">
       <div class="feature-card">
-        <div class="feature-icon">&#8596;</div>
+        <span class="feature-tag">Routing</span>
         <h3>Forward &amp; reverse tunnels</h3>
         <p>Use <code>-L</code> to forward local traffic to remote hosts. Use <code>-R</code> to expose local services on the server.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#9671;</div>
+        <span class="feature-tag">Proxy</span>
         <h3>Dynamic proxying</h3>
         <p>SOCKS5, HTTP proxy, and transparent proxy (tproxy, Linux only) for routing any application's traffic.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#9645;</div>
+        <span class="feature-tag">Transport</span>
         <h3>TCP &middot; UDP &middot; Unix &middot; stdio</h3>
         <p>Tunnel raw TCP, UDP with configurable idle timeout, Unix sockets, and stdio for SSH ProxyCommand.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#9736;</div>
+        <span class="feature-tag">Security</span>
         <h3>mTLS &amp; access control</h3>
         <p>Authenticate clients with certificates. Restrict by path prefix, destination, or a hot-reloading YAML rules file.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#8635;</div>
+        <span class="feature-tag">TLS</span>
         <h3>Auto cert reload</h3>
         <p>TLS certificates, keys, and CA bundles are watched and reloaded without dropping connections.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#9636;</div>
+        <span class="feature-tag">Performance</span>
         <h3>Connection pool</h3>
         <p>Keep idle connections with <code>--connection-min-idle</code> to eliminate TLS handshake latency for SOCKS5 proxying.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#9678;</div>
+        <span class="feature-tag">Firewall</span>
         <h3>Corporate proxy support</h3>
-        <p>Connect through an HTTP proxy with <code>-p http://proxy:8080</code> before reaching the velox server.</p>
+        <p>Connect through an HTTP proxy with <code>-p http://proxy:8080</code> before reaching the Velox server.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#9676;</div>
+        <span class="feature-tag">Stealth</span>
         <h3>ECH &amp; SNI override</h3>
         <p>Override TLS SNI to impersonate any domain. Enable ECH to hide the SNI from deep packet inspection.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">&#11044;</div>
+        <span class="feature-tag">Deploy</span>
         <h3>Single static binary</h3>
         <p>No runtime, no dependencies. One binary for Linux, macOS, Windows, ARM, Android. Drop and run.</p>
       </div>
@@ -281,17 +283,16 @@
         </div>
         <div class="qs-body">
           <div class="qs-step">
-            <span class="qs-step-label">Server</span>
-            <div class="code-block">velox server wss://[::]:8080</div>
+            <span class="qs-step-label">server</span>
           </div>
           <div class="qs-step">
-            <span class="qs-step-label">Client</span>
-            <div class="code-block">velox client -L socks5://127.0.0.1:8888 \
+            <span class="qs-step-label">client</span>
+            <div class="code-block">Velox client -L socks5://127.0.0.1:8888 \
   --connection-min-idle 5 \
   wss://myserver:8080</div>
           </div>
           <div class="qs-step">
-            <span class="qs-step-label">Test</span>
+            <span class="qs-step-label">test</span>
             <div class="code-block">curl -x socks5h://127.0.0.1:8888 http://google.com</div>
           </div>
         </div>
@@ -303,13 +304,13 @@
         </div>
         <div class="qs-body">
           <div class="qs-step">
-            <span class="qs-step-label">Server</span>
-            <div class="code-block">velox server wss://[::]:443 \
+            <span class="qs-step-label">server</span>
+            <div class="code-block">Velox server wss://[::]:443 \
   --restrict-to 127.0.0.1:22</div>
           </div>
           <div class="qs-step">
-            <span class="qs-step-label">Client</span>
-            <div class="code-block">ssh -o ProxyCommand="velox client \
+            <span class="qs-step-label">client</span>
+            <div class="code-block">ssh -o ProxyCommand="Velox client \
   --log-lvl=off \
   -L stdio://%h:%p \
   ws://myserver:443" my-server</div>
@@ -324,14 +325,14 @@
         </div>
         <div class="qs-body">
           <div class="qs-step">
-            <span class="qs-step-label">Server</span>
-            <div class="code-block">velox server wss://[::]:8080 \
+            <span class="qs-step-label">server</span>
+            <div class="code-block">Velox server wss://[::]:8080 \
   --quic-bind 0.0.0.0:8443 \
   --restrict-to localhost:51820</div>
           </div>
           <div class="qs-step">
-            <span class="qs-step-label">Client</span>
-            <div class="code-block">velox client \
+            <span class="qs-step-label">client</span>
+            <div class="code-block">Velox client \
   -L 'udp://51820:localhost:51820?timeout_sec=0' \
   quic://myserver:8443</div>
           </div>
@@ -344,18 +345,18 @@
         </div>
         <div class="qs-body">
           <div class="qs-step">
-            <span class="qs-step-label">Server</span>
-            <div class="code-block">velox server wss://[::]:443</div>
+            <span class="qs-step-label">server</span>
+            <div class="code-block">Velox server wss://[::]:443</div>
           </div>
           <div class="qs-step">
-            <span class="qs-step-label">Client</span>
-            <div class="code-block">velox client \
+            <span class="qs-step-label">client</span>
+            <div class="code-block">Velox client \
   -L tcp://9999:127.0.0.1:22 \
   -p http://corp-proxy:8080 \
   wss://myserver:443</div>
           </div>
           <div class="qs-step">
-            <span class="qs-step-label">Then</span>
+            <span class="qs-step-label">then</span>
             <div class="code-block">ssh -p 9999 user@127.0.0.1</div>
           </div>
         </div>
@@ -367,13 +368,13 @@
         </div>
         <div class="qs-body">
           <div class="qs-step">
-            <span class="qs-step-label">Client</span>
-            <div class="code-block">velox client \
+            <span class="qs-step-label">client</span>
+            <div class="code-block">Velox client \
   -R 'tcp://[::]:8000:localhost:8000' \
   wss://myserver:443</div>
           </div>
           <div class="qs-step">
-            <span class="qs-step-label">From server</span>
+            <span class="qs-step-label">from server</span>
             <div class="code-block">curl http://localhost:8000
 # hits your local machine</div>
           </div>
@@ -387,14 +388,14 @@
         </div>
         <div class="qs-body">
           <div class="qs-step">
-            <span class="qs-step-label">Client</span>
-            <div class="code-block">sudo velox client \
+            <span class="qs-step-label">client</span>
+            <div class="code-block">sudo Velox client \
   -L 'tproxy+tcp://1080' \
   -L 'tproxy+udp://1080' \
   wss://myserver:443</div>
           </div>
           <div class="qs-step">
-            <span class="qs-step-label">Proxy any process</span>
+            <span class="qs-step-label">run</span>
             <div class="code-block">cproxy --port 1080 --mode tproxy \
   -- curl https://google.com</div>
           </div>
@@ -418,7 +419,7 @@
           <span>Binary release</span>
         </div>
         <p>Static binaries for Linux, macOS, Windows, ARM, MIPS, Android.</p>
-        <a href="https://github.com/aerol-ai/velox/releases" class="btn-primary" target="_blank" rel="noopener">Download from GitHub &rarr;</a>
+        <a href="https://github.com/aerol-ai/Velox/releases" class="btn-primary" target="_blank" rel="noopener">Download from GitHub &rarr;</a>
       </div>
 
       <div class="install-card">
@@ -427,7 +428,7 @@
           <span>Docker</span>
         </div>
         <p>Official image with QUIC support built in.</p>
-        <div class="code-block">docker pull ghcr.io/aerol-ai/velox:latest</div>
+        <div class="code-block">docker pull ghcr.io/aerol-ai/Velox:latest</div>
       </div>
 
       <div class="install-card">
@@ -437,14 +438,14 @@
         </div>
         <p>Requires Rust toolchain. QUIC is a feature flag.</p>
         <div class="code-block">cargo build --features quic \
-  --package velox-cli --release</div>
+  --package Velox-cli --release</div>
       </div>
     </div>
 
     <div class="deploy-note">
       <span>&rarr;</span>
-      Deploy in 5 minutes with <a href="https://github.com/aerol-ai/velox/blob/main/setup/docker-compose-setup.md" target="_blank" rel="noopener">Docker Compose + Caddy</a>
-      or <a href="https://github.com/aerol-ai/velox/blob/main/setup/helm-setup.md" target="_blank" rel="noopener">Kubernetes / Helm</a>.
+      Deploy in 5 minutes with <a href="https://github.com/aerol-ai/Velox/blob/main/setup/docker-compose-setup.md" target="_blank" rel="noopener">Docker Compose + Caddy</a>
+      or <a href="https://github.com/aerol-ai/Velox/blob/main/setup/helm-setup.md" target="_blank" rel="noopener">Kubernetes / Helm</a>.
     </div>
   </div>
 </section>
@@ -452,11 +453,11 @@
 <!-- ===== FOOTER ===== -->
 <footer class="footer">
   <div class="footer-inner">
-    <span class="logo">velox</span>
+    <span class="logo">Velox</span>
     <span class="footer-sep">&middot;</span>
     <span>by <a href="https://aerol.ai" target="_blank" rel="noopener">aerol.ai</a></span>
     <span class="footer-sep">&middot;</span>
-    <a href="https://github.com/aerol-ai/velox" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://github.com/aerol-ai/Velox" target="_blank" rel="noopener">GitHub</a>
     <span class="footer-sep">&middot;</span>
     <span>MIT License</span>
   </div>

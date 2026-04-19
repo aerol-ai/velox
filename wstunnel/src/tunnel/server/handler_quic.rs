@@ -79,6 +79,7 @@ fn extract_restrict_path_prefix(connection: &quinn::Connection) -> Option<String
 ///   3. exec_tunnel to open the outbound connector or reverse listener.
 ///   4. Send the response header (status + cookie for dynamic reverse tunnels).
 ///   5. Splice bytes between QUIC stream and target.
+#[allow(clippy::too_many_arguments)]
 async fn handle_quic_stream(
     server: WsServer<impl TokioExecutorRef>,
     restrictions: Arc<RestrictionsRules>,

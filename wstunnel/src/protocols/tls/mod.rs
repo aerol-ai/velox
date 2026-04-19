@@ -1,6 +1,7 @@
 mod server;
 mod utils;
 
+#[cfg(feature = "quic")]
 pub use server::build_server_config;
 pub use server::connect;
 pub use server::load_certificates_from_pem;

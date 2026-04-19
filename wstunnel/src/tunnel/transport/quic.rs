@@ -573,6 +573,10 @@ pub struct QuicClientState {
     pub(crate) _endpoint: quinn::Endpoint,
     pub(crate) connection: quinn::Connection,
     pub(crate) datagram_hub: Arc<QuicDatagramHub>,
+    /// Set to true once quinn signals the server accepted our 0-RTT data. Read by the test
+    /// suite; not consulted by production code (the retry path detects 0-RTT rejection from
+    /// the surfaced error chain instead, since the atomic is set asynchronously).
+    #[allow(dead_code)]
     pub(crate) zero_rtt_accepted: Arc<AtomicBool>,
 }
 

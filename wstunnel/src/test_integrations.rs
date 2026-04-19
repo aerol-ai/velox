@@ -272,6 +272,134 @@ async fn client_quic(
     .unwrap()
 }
 
+/// QUIC client variant pointed at an arbitrary local port. Used by tests that put a UDP
+/// relay (lossy or otherwise) between the client and the real QUIC server.
+#[cfg(feature = "quic")]
+async fn client_quic_at_port(dns_resolver: DnsResolver, target_port: u16) -> WsClient {
+    let tls_connector = tls::tls_connector(false, TransportScheme::Quic.alpn_protocols(), true, None, None, None)
+        .unwrap();
+
+    let client_config = WsClientConfig {
+        remote_addr: TransportAddr::new(
+            TransportScheme::Quic,
+            Host::Ipv4("127.0.0.1".parse().unwrap()),
+            target_port,
+            Some(TlsClientConfig {
+                tls_sni_disabled: false,
+                tls_sni_override: None,
+                tls_verify_certificate: false,
+                tls_connector: Arc::new(RwLock::new(tls_connector)),
+                tls_certificate_path: None,
+                tls_key_path: None,
+            }),
+        )
+        .unwrap(),
+        socket_so_mark: SoMark::new(None),
+        http_upgrade_path_prefix: "wstunnel".to_string(),
+        http_upgrade_credentials: None,
+        http_headers: HashMap::new(),
+        http_headers_file: None,
+        http_header_host: HeaderValue::from_static("127.0.0.1"),
+        timeout_connect: Duration::from_secs(10),
+        websocket_ping_frequency: Some(Duration::from_secs(10)),
+        websocket_mask_frame: false,
+        dns_resolver,
+        http_proxy: None,
+        quic_0rtt: false,
+        quic_keep_alive: Some(Duration::from_secs(15)),
+        quic_max_idle_timeout: Some(Duration::from_secs(60)),
+        quic_max_streams: 1024,
+        quic_datagram_buffer_size: 1024 * 1024,
+    };
+
+    WsClient::new(
+        client_config,
+        1,
+        Duration::from_secs(1),
+        Duration::from_secs(1),
+        DefaultTokioExecutor::default(),
+    )
+    .await
+    .unwrap()
+}
+
+/// Tiny xorshift64* PRNG for the lossy relay. We deliberately avoid pulling in the `rand`
+/// crate just for tests, and a deterministic-but-shifting source is fine here — we only
+/// need an unbiased "drop this packet?" decision.
+#[cfg(feature = "quic")]
+fn pseudo_rand_pct() -> u32 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEED: AtomicU64 = AtomicU64::new(0xcafe_babe_dead_beef);
+    let mut x = SEED.load(Ordering::Relaxed);
+    if x == 0 {
+        x = 0xdead_beef_cafe_babe;
+    }
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    SEED.store(x, Ordering::Relaxed);
+    (x % 100) as u32
+}
+
+/// Spawn a single-client lossy UDP relay. Forwards packets between the client and `target`,
+/// dropping `drop_pct` percent of packets in each direction. Returns the relay's bind
+/// address for the QUIC client to point at. Replaces `tc netem` from the migration plan
+/// (which is Linux+root-only, can't run portably in CI).
+#[cfg(feature = "quic")]
+async fn spawn_lossy_udp_relay(target: SocketAddr, drop_pct: u32) -> SocketAddr {
+    use tokio::net::UdpSocket;
+    let down = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+    let up = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+    up.connect(target).await.unwrap();
+    let bound = down.local_addr().unwrap();
+
+    let last_client: Arc<Mutex<Option<SocketAddr>>> = Arc::new(Mutex::new(None));
+
+    // client -> upstream
+    {
+        let down = down.clone();
+        let up = up.clone();
+        let last_client = last_client.clone();
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65_535];
+            loop {
+                let (n, peer) = match down.recv_from(&mut buf).await {
+                    Ok(v) => v,
+                    Err(_) => break,
+                };
+                *last_client.lock() = Some(peer);
+                if pseudo_rand_pct() < drop_pct {
+                    continue;
+                }
+                let _ = up.send(&buf[..n]).await;
+            }
+        });
+    }
+    // upstream -> client
+    {
+        let down = down.clone();
+        let up = up.clone();
+        let last_client = last_client.clone();
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 65_535];
+            loop {
+                let n = match up.recv(&mut buf).await {
+                    Ok(v) => v,
+                    Err(_) => break,
+                };
+                if pseudo_rand_pct() < drop_pct {
+                    continue;
+                }
+                let dest = *last_client.lock();
+                if let Some(dest) = dest {
+                    let _ = down.send_to(&buf[..n], dest).await;
+                }
+            }
+        });
+    }
+    bound
+}
+
 #[cfg(feature = "quic")]
 fn build_client_mtls_material(
     common_name: &str,
@@ -623,7 +751,7 @@ async fn test_quic_mtls_rejects_wrong_path_prefix(no_restrictions: RestrictionsR
 #[tokio::test]
 #[serial]
 async fn test_tcp_tunnel_quic_0rtt(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
-    let mut server_config = WsServerConfig {
+    let server_config = WsServerConfig {
         socket_so_mark: SoMark::new(None),
         bind: QUIC_SERVER_TCP_BIND,
         websocket_ping_frequency: Some(Duration::from_secs(10)),
@@ -722,4 +850,142 @@ async fn test_tcp_tunnel_quic_0rtt(no_restrictions: RestrictionsRules, dns_resol
         .zero_rtt_accepted
         .load(std::sync::atomic::Ordering::SeqCst);
     assert!(accepted, "Expected 0-RTT to be accepted on the second connection");
+}
+
+/// Connection migration: rebind the client's QUIC endpoint to a different local UDP port
+/// mid-tunnel and verify the open bi-stream survives. QUIC's connection ID + path
+/// validation should keep bytes flowing despite the 4-tuple change. This is the CI-friendly
+/// equivalent of a real Wi-Fi → LTE handover.
+#[cfg(feature = "quic")]
+#[rstest]
+#[timeout(Duration::from_secs(15))]
+#[tokio::test]
+#[serial]
+async fn test_quic_connection_migration(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
+    let server_h = tokio::spawn(
+        server_quic(dns_resolver.clone(), quic_server_tls(None))
+            .serve(no_restrictions, tokio_util::sync::CancellationToken::new()),
+    );
+    defer! { server_h.abort(); };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let client_quic = client_quic(dns_resolver.clone(), 1, "wstunnel", None, None).await;
+
+    let server = TcpTunnelListener::new(TUNNEL_LISTEN.0, (ENDPOINT_LISTEN.1.clone(), ENDPOINT_LISTEN.0.port()), false)
+        .await
+        .unwrap();
+    let client_runner = client_quic.clone();
+    tokio::spawn(async move {
+        client_runner.run_tunnel(server).await.unwrap();
+    });
+
+    let mut tcp_listener = protocols::tcp::run_server(ENDPOINT_LISTEN.0, false).await.unwrap();
+    let mut client_sock = protocols::tcp::connect(
+        &TUNNEL_LISTEN.1,
+        TUNNEL_LISTEN.0.port(),
+        SoMark::new(None),
+        Duration::from_secs(10),
+        &dns_resolver,
+    )
+    .await
+    .unwrap();
+
+    // Establish the QUIC connection + bi-stream by exchanging some bytes first.
+    client_sock.write_all(b"before").await.unwrap();
+    let mut server_sock = tcp_listener.next().await.unwrap().unwrap();
+    let mut buf = BytesMut::new();
+    server_sock.read_buf(&mut buf).await.unwrap();
+    assert_eq!(&buf[..6], b"before");
+    buf.clear();
+
+    server_sock.write_all(b"reply1").await.unwrap();
+    client_sock.read_buf(&mut buf).await.unwrap();
+    assert_eq!(&buf[..6], b"reply1");
+    buf.clear();
+
+    // Rebind the client QUIC endpoint to a new local UDP port. The 4-tuple changes; QUIC's
+    // CID + path validation should keep the open bi-stream alive.
+    {
+        let state_guard = client_quic.quic_state.lock().await;
+        let state = state_guard
+            .as_ref()
+            .expect("QUIC client state should exist after the first exchange");
+        let new_socket = std::net::UdpSocket::bind("127.0.0.1:0")
+            .expect("failed to bind replacement UDP socket for migration test");
+        state
+            ._endpoint
+            .rebind(new_socket)
+            .expect("quinn endpoint rebind failed");
+    }
+
+    // Sending client→server first triggers path validation; the server learns the new
+    // 4-tuple and migrates. Then verify both directions still work.
+    client_sock.write_all(b"after-migration").await.unwrap();
+    server_sock.read_buf(&mut buf).await.unwrap();
+    assert_eq!(&buf[..15], b"after-migration");
+    buf.clear();
+
+    server_sock.write_all(b"post-reply").await.unwrap();
+    client_sock.read_buf(&mut buf).await.unwrap();
+    assert_eq!(&buf[..10], b"post-reply");
+}
+
+/// Lossy-link test: put a UDP relay between client and server that drops 5% of packets in
+/// each direction and verify a moderate payload still round-trips intact through a QUIC
+/// tunnel. Validates that QUIC's per-packet retransmit machinery compensates for loss
+/// without wstunnel framing getting in the way.
+#[cfg(feature = "quic")]
+#[rstest]
+#[timeout(Duration::from_secs(20))]
+#[tokio::test]
+#[serial]
+async fn test_quic_tunnel_survives_packet_loss(no_restrictions: RestrictionsRules, dns_resolver: DnsResolver) {
+    let server_h = tokio::spawn(
+        server_quic(dns_resolver.clone(), quic_server_tls(None))
+            .serve(no_restrictions, tokio_util::sync::CancellationToken::new()),
+    );
+    defer! { server_h.abort(); };
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let relay_addr = spawn_lossy_udp_relay(QUIC_SERVER_UDP_BIND, 5).await;
+    let client_quic = client_quic_at_port(dns_resolver.clone(), relay_addr.port()).await;
+
+    let server = TcpTunnelListener::new(TUNNEL_LISTEN.0, (ENDPOINT_LISTEN.1.clone(), ENDPOINT_LISTEN.0.port()), false)
+        .await
+        .unwrap();
+    let client_runner = client_quic.clone();
+    tokio::spawn(async move {
+        client_runner.run_tunnel(server).await.unwrap();
+    });
+
+    let mut tcp_listener = protocols::tcp::run_server(ENDPOINT_LISTEN.0, false).await.unwrap();
+    let mut client_sock = protocols::tcp::connect(
+        &TUNNEL_LISTEN.1,
+        TUNNEL_LISTEN.0.port(),
+        SoMark::new(None),
+        Duration::from_secs(10),
+        &dns_resolver,
+    )
+    .await
+    .unwrap();
+
+    let payload: Vec<u8> = (0u32..16 * 1024).map(|i| (i % 251) as u8).collect();
+    let send_payload = payload.clone();
+    let writer_task = tokio::spawn(async move {
+        client_sock.write_all(&send_payload).await.unwrap();
+        client_sock.flush().await.unwrap();
+        client_sock
+    });
+
+    let mut server_sock = tcp_listener.next().await.unwrap().unwrap();
+    let mut received = Vec::with_capacity(payload.len());
+    while received.len() < payload.len() {
+        let mut chunk = [0u8; 4096];
+        let n = server_sock.read(&mut chunk).await.unwrap();
+        assert!(n > 0, "TCP stream closed before all bytes were received");
+        received.extend_from_slice(&chunk[..n]);
+    }
+    assert_eq!(received, payload, "payload corrupted under packet loss");
+    let _ = writer_task.await.unwrap();
 }

@@ -581,10 +581,10 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         }
 
         #[cfg(feature = "quic")]
-        if let Some(handle) = _quic_handle {
-            if let Err(e) = handle.await {
-                error!("QUIC server task error: {:?}", e);
-            }
+        if let Some(handle) = _quic_handle
+            && let Err(e) = handle.await
+        {
+            error!("QUIC server task error: {:?}", e);
         }
 
         Ok(())

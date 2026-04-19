@@ -1,8 +1,8 @@
-# docker-compose.yml — Velox tunnel server + Caddy reverse proxy with auto-TLS
+# docker-compose.yml - Velox tunnel server + Caddy reverse proxy with auto-TLS
 #
 # Transport modes:
-#   WebSocket/HTTP2  — via Caddy (HTTPS/WSS, auto-TLS on port 443)
-#   QUIC             — direct UDP on port 8443 (TLS handled by velox itself;
+#   WebSocket/HTTP2  - via Caddy (HTTPS/WSS, auto-TLS on port 443)
+#   QUIC             - direct UDP on port 8443 (TLS handled by velox itself;
 #                      Caddy cannot proxy UDP/QUIC)
 #
 # Quick start:
@@ -20,7 +20,7 @@ services:
     image: ghcr.io/aerol-ai/velox:latest
     restart: unless-stopped
     environment:
-      # Run plain WebSocket — Caddy terminates TLS externally.
+      # Run plain WebSocket - Caddy terminates TLS externally.
       SERVER_PROTOCOL: ws
       SERVER_LISTEN: "[::]"
       SERVER_PORT: "8080"
@@ -30,7 +30,7 @@ services:
       QUIC_BIND: "${QUIC_BIND:-[::]:${QUIC_PORT:-8443}}"
       VELOX_EXTRA_ARGS: "${VELOX_EXTRA_ARGS:-}"
     ports:
-      # QUIC is UDP-only — expose directly (Caddy cannot proxy UDP).
+      # QUIC is UDP-only - expose directly (Caddy cannot proxy UDP).
       # Caddy handles port 443 (WebSocket/HTTP2 over TLS).
       - "${QUIC_PORT:-8443}:${QUIC_PORT:-8443}/udp"
     volumes:
@@ -45,7 +45,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 5s
-    # No external TCP ports — Caddy is the only TCP entry point.
+    # No external TCP ports - Caddy is the only TCP entry point.
 
   # ─── Caddy reverse proxy with auto-TLS ──────────────────────────────────────
   caddy:
@@ -54,7 +54,7 @@ services:
     ports:
       - "80:80"          # HTTP (redirected to HTTPS by Caddy)
       - "443:443"        # HTTPS / WSS
-      - "443:443/udp"    # HTTP/3 (QUIC) — optional, safe to remove
+      - "443:443/udp"    # HTTP/3 (QUIC) - optional, safe to remove
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data         # TLS certificate store (persisted)

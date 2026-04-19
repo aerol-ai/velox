@@ -11,7 +11,7 @@ This stack supports **two independent transport protocols**:
 | **WebSocket / HTTP2** | TCP 443 | Caddy (auto-TLS) | Works through most proxies and CDNs |
 | **QUIC** | UDP 8443 | velox (auto-TLS) | Lowest latency, native UDP tunnels, no proxy |
 
-> QUIC is a separate UDP listener — Caddy cannot proxy UDP. The QUIC port is exposed
+> QUIC is a separate UDP listener - Caddy cannot proxy UDP. The QUIC port is exposed
 > **directly** from the velox container. Both transports can run simultaneously.
 
 ## Prerequisites
@@ -20,9 +20,9 @@ This stack supports **two independent transport protocols**:
 |---|---|
 | Docker Engine | 24+ |
 | Docker Compose plugin | v2 |
-| A public domain/subdomain pointing at your server | — |
+| A public domain/subdomain pointing at your server | - |
 
-> **Local development** works too — set `VELOX_DOMAIN=localhost` and Caddy will
+> **Local development** works too - set `VELOX_DOMAIN=localhost` and Caddy will
 > issue a locally-trusted certificate via its built-in CA (no domain required).
 
 ---
@@ -95,7 +95,7 @@ ssh -o ProxyCommand="velox client --log-lvl=off \
 ### QUIC (lowest latency, native UDP tunnels)
 
 Requires the velox binary to be built with `--features quic` (the Docker image includes this).
-QUIC uses the UDP port directly — no Caddy in the path.
+QUIC uses the UDP port directly - no Caddy in the path.
 
 ```bash
 # SOCKS5 proxy via QUIC

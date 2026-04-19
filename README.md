@@ -7,18 +7,18 @@
   <br/>
 </p>
 
-[![CI — Tests](https://github.com/aerol-ai/velox/actions/workflows/ci.yaml/badge.svg)](https://github.com/aerol-ai/velox/actions/workflows/ci.yaml)
+[![CI - Tests](https://github.com/aerol-ai/velox/actions/workflows/ci.yaml/badge.svg)](https://github.com/aerol-ai/velox/actions/workflows/ci.yaml)
 [![Docker & Helm Package](https://github.com/aerol-ai/velox/actions/workflows/docker-helm.yaml/badge.svg)](https://github.com/aerol-ai/velox/actions/workflows/docker-helm.yaml)
 
 <!-- CI_TEST_RESULTS_START -->
 | Metric | Value |
 |--------|-------|
 | Status | ✅ passing |
-| Passed | — |
+| Passed | - |
 | Failed | 0 |
-| Ignored | — |
+| Ignored | - |
 | Branch | `main` |
-| Last run | — |
+| Last run | - |
 <!-- CI_TEST_RESULTS_END -->
 
 ---
@@ -27,8 +27,8 @@
 
 > **New here?** See the focused setup guides in [`setup/`](setup/):
 >
-> * [Docker Compose + Caddy (auto-TLS)](setup/docker-compose-setup.md) — deploy on any Linux VM in 5 minutes
-> * [Kubernetes / Helm](setup/helm-setup.md) — production-grade cluster deployment
+> * [Docker Compose + Caddy (auto-TLS)](setup/docker-compose-setup.md) - deploy on any Linux VM in 5 minutes
+> * [Kubernetes / Helm](setup/helm-setup.md) - production-grade cluster deployment
 
 ---
 
@@ -728,11 +728,11 @@ Destination host:port
 * **UDP tunnels** → QUIC DATAGRAM frames. The first bytes of the stream register a
   `flow_id` in the `QuicDatagramHub`; subsequent UDP packets travel outside the
   stream for minimum latency. Perfect for WireGuard, DNS, and other UDP workloads.
-* **Single connection, unlimited streams** — unlike WebSocket (one connection per
+* **Single connection, unlimited streams** - unlike WebSocket (one connection per
   tunnel) QUIC reuses one UDP connection for all concurrent tunnels.
-* **TLS is always on** — there is no cleartext QUIC. Velox uses the embedded
+* **TLS is always on** - there is no cleartext QUIC. Velox uses the embedded
   self-signed certificate by default; pass `--tls-certificate` for a real cert.
-* **Wire preamble** — `"VELOX/1\n"` (8 bytes) followed by length-prefixed fields
+* **Wire preamble** - `"VELOX/1\n"` (8 bytes) followed by length-prefixed fields
   (path prefix, JWT, authorization headers, transport mode, flow ID). This
   makes the protocol look like normal QUIC application traffic to middleboxes.
 
@@ -780,7 +780,7 @@ velox client -L 'udp://51820:localhost:51820?timeout_sec=0' quic://myserver.exam
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--quic-bind ADDR:PORT` | — | UDP address to bind the QUIC listener (required to enable QUIC) |
+| `--quic-bind ADDR:PORT` | - | UDP address to bind the QUIC listener (required to enable QUIC) |
 | `--quic-0rtt` | false | Accept 0-RTT on resumed sessions (replay risk) |
 | `--quic-keep-alive` | 15s | Keep-alive interval (0 = off) |
 | `--quic-max-idle-timeout` | 60s | Max idle timeout (0 = off) |
@@ -798,7 +798,7 @@ velox client -L 'udp://51820:localhost:51820?timeout_sec=0' quic://myserver.exam
 | `--quic-max-streams` | 1024 | Max concurrent streams |
 | `--quic-datagram-buffer-size` | 1 MiB | DATAGRAM buffer size |
 
-### QUIC vs WebSocket — when to choose which
+### QUIC vs WebSocket - when to choose which
 
 * **Use QUIC** when you control the network path end-to-end (no corporate proxy between you and the server),
   you want lowest latency, or you are tunnelling UDP (e.g. WireGuard, gaming, DNS).
@@ -807,7 +807,7 @@ velox client -L 'udp://51820:localhost:51820?timeout_sec=0' quic://myserver.exam
 * **Use HTTP/2** only if WebSocket is explicitly blocked and you control the entire path (no buffering proxy).
 
 > **QUIC requires TLS.** There is no cleartext QUIC mode. Velox uses its embedded self-signed certificate
-> by default — supply `--tls-certificate` and `--tls-private-key` for production use.
+> by default - supply `--tls-certificate` and `--tls-private-key` for production use.
 
 > **QUIC does NOT work through Caddy/nginx.** The QUIC UDP port must be exposed directly to the internet.
 > See the [Docker Compose setup](setup/docker-compose-setup.md) and [Helm setup](setup/helm-setup.md) guides

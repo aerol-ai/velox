@@ -2,7 +2,7 @@
 # On success the test-status section of README.md is updated and committed
 # back to the PR branch (same-repo PRs only; fork PRs get a comment instead).
 
-name: CI — Tests
+name: CI - Tests
 
 on:
   pull_request:
@@ -145,7 +145,7 @@ jobs:
             const branch  = '${{ steps.parse.outputs.branch }}';
 
             const body = [
-              `## ${emoji} CI Test Results — ${text}`,
+              `## ${emoji} CI Test Results - ${text}`,
               '',
               '| Metric | Value |',
               '|--------|-------|',

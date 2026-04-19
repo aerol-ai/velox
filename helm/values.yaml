@@ -44,7 +44,7 @@ velox:
   # Log verbosity: TRACE | DEBUG | INFO | WARN | ERROR | OFF
   logLevel: INFO
 
-  # WebSocket upgrade path prefix — acts as a shared secret.
+  # WebSocket upgrade path prefix - acts as a shared secret.
   # Clients must pass -P <prefix>. Leave empty to accept any prefix (insecure).
   httpUpgradePathPrefix: ""
 
@@ -82,15 +82,15 @@ velox:
     # UDP port the velox server listens on for QUIC connections.
     port: 8443
     # Kubernetes Service type for the QUIC UDP port.
-    # LoadBalancer — cloud-provisioned external IP (recommended for production).
-    # NodePort    — for on-prem / bare-metal clusters.
+    # LoadBalancer - cloud-provisioned external IP (recommended for production).
+    # NodePort    - for on-prem / bare-metal clusters.
     serviceType: LoadBalancer
     # Optional QUIC tuning flags. Uncomment to override velox defaults.
     # keepAlive: "15s"             # keep-alive interval (default 15s; 0 = off)
     # maxIdleTimeout: "60s"        # max idle timeout  (default 60s; 0 = off)
     # maxStreams: 1024              # max concurrent bi-directional streams
     # datagramBufferSize: 1048576  # DATAGRAM buffer size in bytes
-    # zeroRtt: false               # enable 0-RTT (replay risk — off by default)
+    # zeroRtt: false               # enable 0-RTT (replay risk - off by default)
     # disableMigration: false      # disable QUIC connection migration
 
   # Extra raw CLI flags passed verbatim after the tunnel address.

@@ -18,7 +18,7 @@ The chart supports **two transport protocols**:
 |---|---|
 | Kubernetes cluster | 1.25+ |
 | Helm | 3.12+ |
-| kubectl (configured) | — |
+| kubectl (configured) | - |
 | Ingress controller | nginx-ingress recommended |
 | cert-manager (optional) | 1.13+ for automatic TLS |
 
@@ -81,7 +81,7 @@ ingress:
       hosts:
         - tunnel.example.com
 
-# QUIC transport — separate UDP LoadBalancer service
+# QUIC transport - separate UDP LoadBalancer service
 velox:
   logLevel: INFO
   quic:
@@ -150,7 +150,7 @@ velox client -L 'udp://51820:localhost:51820?timeout_sec=0' quic://${QUIC_IP}:84
 
 > **QUIC tip:** QUIC multiplexes all tunnels over a single UDP connection with no
 > head-of-line blocking. UDP tunnels use native QUIC DATAGRAM frames for the
-> lowest possible latency — ideal for WireGuard, DNS, and VoIP workloads.
+> lowest possible latency - ideal for WireGuard, DNS, and VoIP workloads.
 
 ### Forward a TCP port (WebSocket)
 

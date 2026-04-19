@@ -72,7 +72,7 @@ ENV QUIC_BIND=""
 # Example: --restrict-to google.com:443 --restrict-config /etc/velox/restrictions.yaml
 ENV VELOX_EXTRA_ARGS=""
 EXPOSE 8080
-# QUIC/UDP port — only used when QUIC_BIND is set
+# QUIC/UDP port - only used when QUIC_BIND is set
 EXPOSE 8443/udp
 
 USER app

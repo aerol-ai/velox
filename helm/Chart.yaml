@@ -1,6 +1,6 @@
 apiVersion: v2
 name: velox
-description: Velox tunnel server — WebSocket/HTTP2/QUIC tunnel for bypassing firewalls and proxies
+description: Velox tunnel server - WebSocket/HTTP2/QUIC tunnel for bypassing firewalls and proxies
 type: application
 version: 0.1.0
 appVersion: "latest"

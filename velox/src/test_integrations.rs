@@ -324,7 +324,7 @@ async fn client_quic_at_port(dns_resolver: DnsResolver, target_port: u16) -> WsC
 }
 
 /// Tiny xorshift64* PRNG for the lossy relay. We deliberately avoid pulling in the `rand`
-/// crate just for tests, and a deterministic-but-shifting source is fine here — we only
+/// crate just for tests, and a deterministic-but-shifting source is fine here - we only
 /// need an unbiased "drop this packet?" decision.
 #[cfg(feature = "quic")]
 fn pseudo_rand_pct() -> u32 {

@@ -45,15 +45,15 @@ Observations about gaps in velox's feature set today (v10.5.2). Each entry names
 
 ### 8. Config file for the CLI
 **Today:** `velox` only takes flags and env vars; `restrictions.yaml` is the only config file. Heavy invocations (many `-L`/`-R`, TLS, headers file) become unwieldy shell commands.
-**Gap:** `--config velox.yaml` parsing `Client`/`Server` into one file. Most of the plumbing is there because `Client`/`Server` already derive `Debug` + are `Clone` — add `Deserialize`.
+**Gap:** `--config velox.yaml` parsing `Client`/`Server` into one file. Most of the plumbing is there because `Client`/`Server` already derive `Debug` + are `Clone` - add `Deserialize`.
 
 ### 9. Systemd / graceful shutdown
-**Today:** `main.rs` handles `ctrl_c` only in the stdio path. The server's accept loop is `loop {}`—no SIGTERM handler, no drain, no "finish in-flight tunnels then exit".
+**Today:** `main.rs` handles `ctrl_c` only in the stdio path. The server's accept loop is `loop {}`-no SIGTERM handler, no drain, no "finish in-flight tunnels then exit".
 **Gap:** wire `tokio::signal` into `run_server_impl` + emit a drained signal.
 
 ### 10. Reverse-tunnel listener listing / admin API
 **Today:** the set of currently-bound reverse listeners and in-flight tunnels is only observable via logs. `ReverseTunnelServer<L>` keeps them in a `LazyLock<…>` singleton.
-**Gap:** a local admin socket (unix domain) that dumps the state — useful for scripted cleanup.
+**Gap:** a local admin socket (unix domain) that dumps the state - useful for scripted cleanup.
 
 ### 11. Dynamic tunnel add/remove
 **Today:** tunnels are set at start time; the only way to add or remove one is to restart the client.
@@ -72,12 +72,12 @@ Observations about gaps in velox's feature set today (v10.5.2). Each entry names
 **Gap:** a `tcp://` transport for when the velox server can be exposed directly and the HTTP framing overhead is pure loss.
 
 ### 14. Multiplexing over one TCP connection
-**Today:** each tunnel opens its own HTTP upgrade (or reuses a pooled idle WS). There is no per-connection mux — pooling helps throughput but wastes a TCP+TLS handshake every time the pool is cold.
+**Today:** each tunnel opens its own HTTP upgrade (or reuses a pooled idle WS). There is no per-connection mux - pooling helps throughput but wastes a TCP+TLS handshake every time the pool is cold.
 **Gap:** sub-stream multiplexing (yamux/smux) so one transport connection carries many logical tunnels.
 
 ### 15. ICMP / raw-IP tunneling
 **Today:** only TCP/UDP/Unix/Stdio. No way to tunnel ICMP (ping), GRE, or raw IP packets.
-**Gap:** a tun/tap-device listener (Linux/macOS) feeding arbitrary L3 packets across the tunnel. Much larger scope — practically a new product.
+**Gap:** a tun/tap-device listener (Linux/macOS) feeding arbitrary L3 packets across the tunnel. Much larger scope - practically a new product.
 
 ### 16. IPv6 happy-eyeballs
 **Today:** `DnsResolver::new_from_urls` takes a `prefer_ipv4` flag and resolves one family first. No RFC 8305-style parallel attempts.
@@ -91,7 +91,7 @@ Observations about gaps in velox's feature set today (v10.5.2). Each entry names
 **Today:** `Socks5TunnelListener` / `fast-socks5` usage supports CONNECT. UDP ASSOCIATE is not advertised.
 **Gap:** tools like DNS-over-SOCKS5 or games cannot use reverse/forward SOCKS5 for UDP.
 
-### 18. HTTP proxy — non-CONNECT support
+### 18. HTTP proxy - non-CONNECT support
 **Today:** the HTTP proxy listener handles CONNECT + absolute-URI GET. Many legacy clients send other methods (POST with absolute URI, keep-alive reuse, CONNECT-Piggyback).
 **Gap:** proper HTTP-proxy compliance beyond the common path.
 
@@ -113,7 +113,7 @@ Observations about gaps in velox's feature set today (v10.5.2). Each entry names
 
 ### 22. Reverse HTTP with vhosts
 **Today:** `ReverseHttpProxy` is a reverse HTTP-CONNECT proxy, not an HTTP vhost router. You can't say "requests to `foo.example.com` go to client A, `bar.example.com` to client B".
-**Gap:** a new reverse mode that parses the `Host:` header and routes by hostname — would turn velox into an ngrok-style named-host exposer.
+**Gap:** a new reverse mode that parses the `Host:` header and routes by hostname - would turn velox into an ngrok-style named-host exposer.
 
 ### 23. TLS-terminated reverse tunnels
 **Today:** reverse tunnels expose raw TCP on the server. If you want TLS on the public side, put a reverse proxy in front.
@@ -176,12 +176,12 @@ Observations about gaps in velox's feature set today (v10.5.2). Each entry names
 ## Developer / ecosystem
 
 ### 34. Stable public library API
-**Today:** `velox` is published as a path dep only (see `velox-cli/Cargo.toml`). `LocalProtocol` is `pub` but many supporting types (`TransportAddr`, `Socks5TunnelListener`, etc.) are `pub` inside private modules — subject to change at any release.
+**Today:** `velox` is published as a path dep only (see `velox-cli/Cargo.toml`). `LocalProtocol` is `pub` but many supporting types (`TransportAddr`, `Socks5TunnelListener`, etc.) are `pub` inside private modules - subject to change at any release.
 **Gap:** publish `velox` on crates.io with a documented surface.
 
 ### 35. Language bindings
 **Today:** Rust library only.
-**Gap:** a thin C ABI (`velox-sys`) would unlock iOS/Android embedding and browser extensions — mobile is already a target in CI via Android builds.
+**Gap:** a thin C ABI (`velox-sys`) would unlock iOS/Android embedding and browser extensions - mobile is already a target in CI via Android builds.
 
 ### 36. `#[tokio::test]`-friendly test harness
 **Today:** integration tests bind fixed `127.0.0.1:9998/9999` and are `#[serial]`. Running a subset or parallelizing requires careful test selection.
@@ -205,4 +205,4 @@ Observations about gaps in velox's feature set today (v10.5.2). Each entry names
 
 ### 40. Machine-readable CLI help
 **Today:** clap help is prose with URL examples. There is no JSON schema for the `-L`/`-R` URI format.
-**Gap:** a `--emit-schema` flag producing a JSON schema — useful for GUI frontends.
+**Gap:** a `--emit-schema` flag producing a JSON schema - useful for GUI frontends.

@@ -498,7 +498,15 @@ async fn run_server_impl(
         ));
     }
 
-    let tls_config = if args.remote_addr.scheme() == "wss" {
+    // QUIC always requires TLS, even when the TCP listener is plain `ws://` (i.e. when a
+    // reverse proxy like Caddy terminates TLS for WS/H2 in front of velox). So we build
+    // the TLS config whenever the scheme is `wss` OR a QUIC bind is configured.
+    #[cfg(feature = "quic")]
+    let needs_tls = args.remote_addr.scheme() == "wss" || args.quic_bind.is_some();
+    #[cfg(not(feature = "quic"))]
+    let needs_tls = args.remote_addr.scheme() == "wss";
+
+    let tls_config = if needs_tls {
         let tls_certificate = if let Some(cert_path) = &args.tls_certificate {
             tls::load_certificates_from_pem(cert_path).expect("Cannot load tls certificate")
         } else {
@@ -528,6 +536,7 @@ async fn run_server_impl(
     } else {
         None
     };
+    let tls_terminate_tcp = args.remote_addr.scheme() == "wss";
 
     let restrictions = if let Some(path) = &args.restrict_config {
         RestrictionsRules::from_config_file(path).expect("Cannot parse restriction file")
@@ -564,6 +573,7 @@ async fn run_server_impl(
         timeout_connect: Duration::from_secs(10),
         websocket_mask_frame: args.websocket_mask_frame,
         tls: tls_config,
+        tls_terminate_tcp,
         dns_resolver: DnsResolver::new_from_urls(
             &args.dns_resolver,
             None,

@@ -60,6 +60,10 @@ pub struct WsServerConfig {
     pub timeout_connect: Duration,
     pub websocket_mask_frame: bool,
     pub tls: Option<TlsServerConfig>,
+    /// When false, the TCP listener accepts plaintext (e.g. behind a reverse proxy that
+    /// terminates TLS) even though `tls` is `Some`. The certs in `tls` are then only used
+    /// by the QUIC listener, which always requires TLS.
+    pub tls_terminate_tcp: bool,
     pub dns_resolver: DnsResolver,
     pub restriction_config: Option<PathBuf>,
     pub http_proxy: Option<Url>,
@@ -434,19 +438,20 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         // Init TLS if needed. The reloader is built once and shared (as Arc) between the TCP
         // accept loop and the QUIC accept loop so both consumers see every cert-change event.
         let tls_reloader = Arc::new(TlsReloader::new_for_server(self.config.clone())?);
-        let mut tls_context = if let Some(tls_config) = &self.config.tls {
-            let tls_context = TlsContext {
-                tls_acceptor: Arc::new(tls::tls_acceptor(
+        let mut tls_context =
+            if let Some(tls_config) = self.config.tls.as_ref().filter(|_| self.config.tls_terminate_tcp) {
+                let tls_context = TlsContext {
+                    tls_acceptor: Arc::new(tls::tls_acceptor(
+                        tls_config,
+                        Some(vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
+                    )?),
+                    tls_reloader: tls_reloader.clone(),
                     tls_config,
-                    Some(vec![b"h2".to_vec(), b"http/1.1".to_vec()]),
-                )?),
-                tls_reloader: tls_reloader.clone(),
-                tls_config,
+                };
+                Some(tls_context)
+            } else {
+                None
             };
-            Some(tls_context)
-        } else {
-            None
-        };
 
         // Bind server and run forever to serve incoming connections.
         let restrictions = RestrictionsRulesReloader::new(restrictions, self.config.restriction_config.clone())?;
@@ -627,6 +632,7 @@ impl Debug for WsServerConfig {
             .field("websocket_mask_frame", &self.websocket_mask_frame)
             .field("restriction_config", &self.restriction_config)
             .field("tls", &self.tls.is_some())
+            .field("tls_terminate_tcp", &self.tls_terminate_tcp)
             .field("remote_server_idle_timeout", &self.remote_server_idle_timeout)
             .field(
                 "mTLS",

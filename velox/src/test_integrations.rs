@@ -68,6 +68,7 @@ fn server_no_tls(dns_resolver: DnsResolver) -> WsServer {
         restriction_config: None,
         http_proxy: None,
         remote_server_idle_timeout: Duration::from_secs(30),
+        reverse_tunnel_bind: None,
         #[cfg(feature = "quic")]
         quic_bind: None,
         #[cfg(feature = "quic")]
@@ -188,6 +189,7 @@ fn server_quic(dns_resolver: DnsResolver, tls: TlsServerConfig) -> WsServer {
         restriction_config: None,
         http_proxy: None,
         remote_server_idle_timeout: Duration::from_secs(30),
+        reverse_tunnel_bind: None,
         quic_bind: Some(QUIC_SERVER_UDP_BIND),
         quic_0rtt: false,
         quic_keep_alive: Some(Duration::from_secs(15)),
@@ -775,6 +777,7 @@ async fn test_tcp_tunnel_quic_0rtt(no_restrictions: RestrictionsRules, dns_resol
         restriction_config: None,
         http_proxy: None,
         remote_server_idle_timeout: Duration::from_secs(30),
+        reverse_tunnel_bind: None,
         quic_bind: Some(QUIC_SERVER_UDP_BIND),
         quic_0rtt: true,
         quic_keep_alive: Some(Duration::from_secs(15)),

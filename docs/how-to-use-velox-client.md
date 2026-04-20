@@ -96,21 +96,31 @@ brew install velox
 
 ### macOS / Linux — Download Binary
 
-Go to [https://github.com/aerol-ai/velox/releases/latest](https://github.com/aerol-ai/velox/releases/latest) and download:
+Releases are published as gzipped tarballs on [https://github.com/aerol-ai/velox/releases/latest](https://github.com/aerol-ai/velox/releases/latest). Each tarball contains a single `velox` binary.
 
-| Platform | Binary filename |
-|----------|----------------|
-| macOS (Apple Silicon) | `velox-aarch64-apple-darwin` |
-| macOS (Intel) | `velox-x86_64-apple-darwin` |
-| Linux x86_64 | `velox-x86_64-unknown-linux-musl` |
-| Linux arm64 | `velox-aarch64-unknown-linux-musl` |
-| Raspberry Pi | `velox-armv7-unknown-linux-musleabihf` |
+| Platform | Tarball filename (`{VERSION}` is e.g. `0.0.1`) |
+|----------|-----------------------------------------------|
+| macOS (Apple Silicon) | `velox_{VERSION}_darwin_arm64.tar.gz` |
+| macOS (Intel) | `velox_{VERSION}_darwin_amd64.tar.gz` |
+| Linux x86_64 | `velox_{VERSION}_linux_amd64.tar.gz` |
+| Linux arm64 | `velox_{VERSION}_linux_arm64.tar.gz` |
+| Linux ARMv7 (Pi 3/4) | `velox_{VERSION}_linux_armv7.tar.gz` |
+| Linux ARMv6 (Pi Zero/1) | `velox_{VERSION}_linux_armv6.tar.gz` |
+| Linux x86 (32-bit) | `velox_{VERSION}_linux_386.tar.gz` |
+| FreeBSD x86_64 | `velox_{VERSION}_freebsd_amd64.tar.gz` |
+
+> Asset filenames include the version, so there is no version-less `latest/download/<name>` alias — use the GitHub API (as shown below) or fetch the exact versioned URL.
 
 ```bash
-# Example: macOS Apple Silicon
-curl -Lo velox https://github.com/aerol-ai/velox/releases/latest/download/velox-aarch64-apple-darwin
+# macOS Apple Silicon — resolves the latest version automatically
+TAG=$(curl -s https://api.github.com/repos/aerol-ai/velox/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+VERSION=${TAG#v}
+curl -Lo velox.tar.gz \
+  "https://github.com/aerol-ai/velox/releases/download/${TAG}/velox_${VERSION}_darwin_arm64.tar.gz"
+tar -xzf velox.tar.gz velox
 chmod +x velox
 sudo mv velox /usr/local/bin/
+rm velox.tar.gz
 
 # Verify
 velox --version
@@ -119,15 +129,20 @@ velox --version
 ### Linux — one-liner
 
 ```bash
-ARCH=$(uname -m)
-case $ARCH in
-  x86_64)  BIN="velox-x86_64-unknown-linux-musl" ;;
-  aarch64) BIN="velox-aarch64-unknown-linux-musl" ;;
-  armv7l)  BIN="velox-armv7-unknown-linux-musleabihf" ;;
+TAG=$(curl -s https://api.github.com/repos/aerol-ai/velox/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+VERSION=${TAG#v}
+case "$(uname -m)" in
+  x86_64)  ARCH=amd64 ;;
+  aarch64) ARCH=arm64 ;;
+  armv7l)  ARCH=armv7 ;;
+  armv6l)  ARCH=armv6 ;;
+  i686)    ARCH=386 ;;
 esac
-curl -Lo /usr/local/bin/velox \
-  "https://github.com/aerol-ai/velox/releases/latest/download/${BIN}"
-chmod +x /usr/local/bin/velox
+curl -Lo /tmp/velox.tar.gz \
+  "https://github.com/aerol-ai/velox/releases/download/${TAG}/velox_${VERSION}_linux_${ARCH}.tar.gz"
+sudo tar -xzf /tmp/velox.tar.gz -C /usr/local/bin/ velox
+sudo chmod +x /usr/local/bin/velox
+rm /tmp/velox.tar.gz
 ```
 
 ### Build from Source (with QUIC)
@@ -805,11 +820,13 @@ graph LR
 
 ## 10. Quick Reference Cheatsheet <a name="cheatsheet"></a>
 
-### Install (macOS)
+### Install (macOS Apple Silicon)
 
 ```bash
-curl -Lo velox https://github.com/aerol-ai/velox/releases/latest/download/velox-aarch64-apple-darwin
-chmod +x velox && sudo mv velox /usr/local/bin/
+TAG=$(curl -s https://api.github.com/repos/aerol-ai/velox/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+curl -Lo velox.tar.gz \
+  "https://github.com/aerol-ai/velox/releases/download/${TAG}/velox_${TAG#v}_darwin_arm64.tar.gz"
+tar -xzf velox.tar.gz velox && chmod +x velox && sudo mv velox /usr/local/bin/ && rm velox.tar.gz
 ```
 
 ### Expose local app (reverse tunnel)

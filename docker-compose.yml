@@ -23,6 +23,9 @@ services:
   velox:
     image: ghcr.io/aerol-ai/velox:latest
     restart: unless-stopped
+    # Run as root so velox can read Caddy's cert files (Caddy writes them as
+    # root:root mode 0600 inside the shared `caddy_data` volume).
+    user: root
     dns:
       - 1.1.1.1
       - 8.8.8.8

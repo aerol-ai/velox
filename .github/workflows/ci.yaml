@@ -8,9 +8,19 @@ on:
   pull_request:
     branches:
       - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "setup/**"
+      - "LICENSE"
   push:
     branches:
       - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "setup/**"
+      - "LICENSE"
 
 jobs:
   test:

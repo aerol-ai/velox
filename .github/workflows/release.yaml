@@ -1,10 +1,11 @@
 on:
-  # Indicates I want to run this workflow on all branches, PR, and tags
+  # Only build + release when a version tag is pushed. The `release` job
+  # already required a `v*` tag, so running the 9-target matrix on every
+  # main/draft push just burned CI minutes for nothing.
   push:
-    branches: [ "main", "draft" ]
-    tags: [ "*" ]
-  # pull_request:
-  #   branches: [ "main" ]
+    tags: [ "v*" ]
+  # Manual trigger for one-off test builds of the full matrix.
+  workflow_dispatch:
 
 env:
   RUST_VERSION: 1.95.0

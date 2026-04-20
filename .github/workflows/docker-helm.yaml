@@ -18,6 +18,14 @@ on:
       - main
     tags:
       - "v*"
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "setup/**"
+      - "LICENSE"
+      - ".github/workflows/ci.yaml"
+      - ".github/workflows/auto-close.yaml"
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io

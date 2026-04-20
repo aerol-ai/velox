@@ -23,30 +23,30 @@ jobs:
           # Linux
           - name: Linux x86_64
             target: x86_64-unknown-linux-musl
-            build-args: "--release --features=jemalloc"
+            build-args: "--release --features=jemalloc,quic"
 
           - name: Linux x86
             target: i686-unknown-linux-musl
-            build-args: "--release --features aws-lc-rs-bindgen"
+            build-args: "--release --features=aws-lc-rs-bindgen,quic"
 
           - name: Linux aarch64
             target: aarch64-unknown-linux-musl
-            build-args: "--release --features=jemalloc -vv"
+            build-args: "--release --features=jemalloc,quic -vv"
           - name: Linux armv7hf
             target: armv7-unknown-linux-musleabihf
-            build-args: "--release --no-default-features --features ring"
+            build-args: "--release --no-default-features --features=ring,quic"
 
           - name: Linux armv6
             target: arm-unknown-linux-musleabihf
-            build-args: "--release --no-default-features --features ring"
+            build-args: "--release --no-default-features --features=ring,quic"
 
           - name: Freebsd x86_64
             target: x86_64-unknown-freebsd
-            build-args: "--release --no-default-features --features ring --features=jemalloc"
+            build-args: "--release --no-default-features --features=ring,jemalloc,quic"
 
           - name: Freebsd x86
             target: i686-unknown-freebsd
-            build-args: "--release --no-default-features --features ring"
+            build-args: "--release --no-default-features --features=ring,quic"
 
           # - name: Android aarch64
           #   target: aarch64-linux-android
@@ -66,12 +66,12 @@ jobs:
           - name: MacOS x86_64
             os: macos-latest
             target: x86_64-apple-darwin
-            build-args: "--release --features=jemalloc"
+            build-args: "--release --features=jemalloc,quic"
 
           - name: MacOS aarch64
             os: macos-latest
             target: aarch64-apple-darwin
-            build-args: "--release --features=jemalloc"
+            build-args: "--release --features=jemalloc,quic"
 
           # - name: iOS x86_64
           #   target: x86_64-apple-ios

@@ -76,7 +76,7 @@
         default ""
     }
 
-    @tunnel vars_regexp {tunnel_port} ^\d+$
+    @tunnel `{tunnel_port} != ""`
     handle @tunnel {
         reverse_proxy velox:{tunnel_port} {
             transport http {

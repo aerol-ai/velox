@@ -39,7 +39,7 @@ services:
       # Set QUIC_BIND to enable; leave blank to disable.
       QUIC_BIND: "${QUIC_BIND:-[::]:${QUIC_PORT:-8443}}"
       # Bind reverse tunnel listeners on all interfaces so Caddy can reach them.
-      VELOX_REVERSE_TUNNEL_BIND: "${VELOX_REVERSE_TUNNEL_BIND:-[::]}"
+      VELOX_REVERSE_TUNNEL_BIND: "${VELOX_REVERSE_TUNNEL_BIND:-::}"
       VELOX_EXTRA_ARGS: "${VELOX_EXTRA_ARGS:-}"
     ports:
       # QUIC is UDP-only - expose directly (Caddy cannot proxy UDP).

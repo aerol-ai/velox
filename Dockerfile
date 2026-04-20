@@ -71,7 +71,7 @@ ENV QUIC_BIND=""
 # Bind IP for reverse tunnel listeners. Default [::] (all interfaces) so
 # reverse-proxied containers (Caddy) can reach the tunnel ports.
 # Set to empty to disable the override (uses whatever the client requests).
-ENV VELOX_REVERSE_TUNNEL_BIND="[::]"
+ENV VELOX_REVERSE_TUNNEL_BIND="::"
 # Extra CLI flags forwarded verbatim to `velox server …`.
 # Example: --restrict-to google.com:443 --restrict-config /etc/velox/restrictions.yaml
 ENV VELOX_EXTRA_ARGS=""

@@ -23,6 +23,9 @@ services:
   velox:
     image: ghcr.io/aerol-ai/velox:latest
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     environment:
       # Run plain WebSocket - Caddy terminates TLS externally.
       SERVER_PROTOCOL: ws
@@ -63,6 +66,9 @@ services:
   caddy:
     image: ghcr.io/aerol-ai/caddy-cloudflare:main
     restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     ports:
       - "80:80"          # HTTP (redirected to HTTPS by Caddy)
       - "443:443"        # HTTPS / WSS

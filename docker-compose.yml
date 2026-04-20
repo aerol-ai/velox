@@ -41,7 +41,8 @@ services:
       # Uncomment to apply a custom restrictions config.
       # The file controls which tunnels are permitted (host/port allowlist).
       # - ./restrictions.yaml:/home/app/restrictions.yaml:ro
-      []
+      # Share Caddy's ACME certs so velox can use them for QUIC TLS.
+      - caddy_data:/caddy-data:ro
     # velox does not expose an HTTP health endpoint, so we probe the TCP port.
     healthcheck:
       test: ["CMD-SHELL", "ss -tlnp | grep -q ':8080'"]
@@ -49,6 +50,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 5s
+    depends_on:
+      caddy:
+        condition: service_healthy
     # No external TCP ports - Caddy is the only TCP entry point.
 
   # ─── Caddy reverse proxy with auto-TLS + Cloudflare DNS-01 wildcard ─────────
@@ -74,9 +78,12 @@ services:
       CLOUDFLARE_API_TOKEN: "${CLOUDFLARE_API_TOKEN}"
       # Email used for Let's Encrypt account registration
       CADDY_EMAIL: "${CADDY_EMAIL:-admin@example.com}"
-    depends_on:
-      velox:
-        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "caddy version"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
 volumes:
   caddy_data:

@@ -67,11 +67,18 @@
         resolvers 1.1.1.1
     }
 
-    # Extract the leftmost subdomain label (the port number) regardless of
-    # how many labels VELOX_DOMAIN has (works for aerol.cloud, velox.aerol.ai, etc.)
-    @tunnel header_regexp subdomain Host ^(\d+)\.
+    # Extract the leftmost subdomain label (the port number) from the request
+    # host. Using {host} here is more reliable than matching the Host header
+    # directly, which can leave the placeholder empty and make reverse_proxy
+    # fall back to an invalid upstream like [::1]:0.
+    map {host} {tunnel_port} {
+        ~^(\d+)\. "${1}"
+        default ""
+    }
+
+    @tunnel vars_regexp {tunnel_port} ^\d+$
     handle @tunnel {
-        reverse_proxy velox:{re.subdomain.1} {
+        reverse_proxy velox:{tunnel_port} {
             transport http {
                 read_timeout  0
                 write_timeout 0

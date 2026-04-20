@@ -122,16 +122,12 @@ async fn main() -> anyhow::Result<()> {
             });
 
             let executor = DefaultTokioExecutor::default();
-            let executor_clone = executor.clone();
 
-            let serve_fut = async move {
-                if let Err(err) = run_server(*args, executor_clone.clone(), shutdown.clone()).await {
-                    panic!("Cannot start velox server: {err:?}");
-                }
-                executor_clone.wait().await;
-            };
+            if let Err(err) = run_server(*args, executor.clone(), shutdown.clone()).await {
+                panic!("Cannot start velox server: {err:?}");
+            }
 
-            match tokio::time::timeout(std::time::Duration::from_secs(30), serve_fut).await {
+            match tokio::time::timeout(std::time::Duration::from_secs(30), executor.wait()).await {
                 Ok(_) => tracing::info!("Graceful shutdown complete."),
                 Err(_) => tracing::warn!("Graceful shutdown timed out after 30s. Forcefully exiting."),
             }

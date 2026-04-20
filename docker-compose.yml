@@ -50,8 +50,10 @@ services:
       # Share Caddy's ACME certs so velox can use them for QUIC TLS.
       - caddy_data:/caddy-data:ro
     # velox does not expose an HTTP health endpoint, so we probe the TCP port.
+    # Uses bash's /dev/tcp to avoid needing netcat/ss (not in debian:trixie-slim).
+    # Invoked via bash explicitly because /bin/sh is dash on Debian.
     healthcheck:
-      test: ["CMD-SHELL", "ss -tlnp | grep -q ':8080'"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
       interval: 30s
       timeout: 10s
       retries: 3

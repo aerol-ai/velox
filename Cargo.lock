@@ -3960,7 +3960,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "velox"
-version = "10.5.2"
+version = "0.0.1"
 dependencies = [
  "ahash",
  "anyhow",
@@ -4020,7 +4020,7 @@ dependencies = [
 
 [[package]]
 name = "velox-cli"
-version = "10.5.2"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",

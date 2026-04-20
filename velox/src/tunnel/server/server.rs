@@ -31,7 +31,7 @@ use socket2::SockRef;
 use std::fmt;
 use std::fmt::{Debug, Formatter};
 use std::hash::{Hash, Hasher};
-use std::net::{Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, LazyLock};
@@ -68,6 +68,11 @@ pub struct WsServerConfig {
     pub restriction_config: Option<PathBuf>,
     pub http_proxy: Option<Url>,
     pub remote_server_idle_timeout: Duration,
+    /// When set, forces every accepted reverse tunnel to bind to this IP regardless of
+    /// the host the client requested. Useful when velox runs in a container behind a
+    /// reverse proxy (e.g. Caddy) that needs to reach the tunnel port across the
+    /// container network.
+    pub reverse_tunnel_bind: Option<IpAddr>,
     #[cfg(feature = "quic")]
     pub quic_bind: Option<SocketAddr>,
     #[cfg(feature = "quic")]
@@ -168,6 +173,17 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
         Ok((remote_addr, local_rx, local_tx, inject_cookie))
     }
 
+    /// If the server has a `reverse_tunnel_bind` override configured, replace the
+    /// requested host with that IP so the reverse listener binds to the right
+    /// interface (e.g. `[::]` instead of `127.0.0.1`).
+    fn override_reverse_host(&self, host: Host) -> Host {
+        match self.config.reverse_tunnel_bind {
+            Some(IpAddr::V4(ip)) => Host::Ipv4(ip),
+            Some(IpAddr::V6(ip)) => Host::Ipv6(ip),
+            None => host,
+        }
+    }
+
     pub(super) async fn exec_tunnel(
         &self,
         restriction: &RestrictionConfig,
@@ -221,7 +237,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                     LazyLock::new(ReverseTunnelServer::new);
 
                 let remote_port = find_mapped_port(remote.port, restriction);
-                let local_srv = (remote.host, remote_port);
+                let local_srv = (self.override_reverse_host(remote.host), remote_port);
                 let bind = try_to_sock_addr(local_srv.clone())?;
                 let listening_server = async { TcpTunnelListener::new(bind, local_srv.clone(), false).await };
                 let ((local_rx, local_tx), remote) = SERVERS
@@ -241,7 +257,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                     LazyLock::new(ReverseTunnelServer::new);
 
                 let remote_port = find_mapped_port(remote.port, restriction);
-                let local_srv = (remote.host, remote_port);
+                let local_srv = (self.override_reverse_host(remote.host), remote_port);
                 let bind = try_to_sock_addr(local_srv.clone())?;
                 let listening_server = async { UdpTunnelListener::new(bind, local_srv.clone(), timeout).await };
                 let ((local_rx, local_tx), remote) = SERVERS
@@ -260,7 +276,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                     LazyLock::new(ReverseTunnelServer::new);
 
                 let remote_port = find_mapped_port(remote.port, restriction);
-                let local_srv = (remote.host, remote_port);
+                let local_srv = (self.override_reverse_host(remote.host), remote_port);
                 let bind = try_to_sock_addr(local_srv.clone())?;
                 let listening_server = async { Socks5TunnelListener::new(bind, timeout, credentials).await };
                 let ((local_rx, local_tx), remote) = SERVERS
@@ -280,7 +296,7 @@ impl<E: crate::TokioExecutorRef> WsServer<E> {
                     LazyLock::new(ReverseTunnelServer::new);
 
                 let remote_port = find_mapped_port(remote.port, restriction);
-                let local_srv = (remote.host, remote_port);
+                let local_srv = (self.override_reverse_host(remote.host), remote_port);
                 let bind = try_to_sock_addr(local_srv.clone())?;
                 let listening_server = async { HttpProxyTunnelListener::new(bind, timeout, credentials, false).await };
                 let ((local_rx, local_tx), remote) = SERVERS
@@ -634,6 +650,7 @@ impl Debug for WsServerConfig {
             .field("tls", &self.tls.is_some())
             .field("tls_terminate_tcp", &self.tls_terminate_tcp)
             .field("remote_server_idle_timeout", &self.remote_server_idle_timeout)
+            .field("reverse_tunnel_bind", &self.reverse_tunnel_bind)
             .field(
                 "mTLS",
                 &self

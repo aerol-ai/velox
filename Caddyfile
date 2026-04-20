@@ -53,16 +53,12 @@
 # ── 2. Wildcard subdomain → auto port routing ────────────────────────────────
 #
 # Matches any subdomain: 3001.<VELOX_DOMAIN>, 5432.<VELOX_DOMAIN>, etc.
-# The leftmost label is used as the port number on localhost.
-#
-# Caddy label numbering (right-to-left):
-#   3001.velox.aerol.ai
-#   ↑                ↑
-#   {labels.4}    {labels.1}
+# The leftmost label is extracted via a regexp host matcher and used as the
+# port number on the velox container.
 #
 # Usage (no server config needed after this):
 #   velox client -R 'tcp://3001:localhost:3000' quic://<VELOX_DOMAIN>:8443
-#   → https://3001.<VELOX_DOMAIN>  proxies to localhost:3001 on the server
+#   → https://3001.<VELOX_DOMAIN>  proxies to velox:3001 on the server
 #      which routes through the reverse tunnel to your localhost:3000
 #
 *.{$VELOX_DOMAIN:localhost} {
@@ -71,24 +67,23 @@
         resolvers 1.1.1.1
     }
 
-    # Security: block access to privileged ports (< 1024) via subdomain routing.
-    # Only ports 1024–65535 can be targeted this way.
-    @privileged {
-        # {labels.4} is the leftmost subdomain label (the port number).
-        # We cannot do arithmetic in Caddy matchers, so we block well-known
-        # single/double-digit and triple-digit prefixes that map to priv ports.
-        # For tighter control, add a restriction.yaml on the velox server side.
-        not path *
-        # Allow all — restrict at the velox restrictions.yaml level instead.
+    # Extract the leftmost subdomain label (the port number) regardless of
+    # how many labels VELOX_DOMAIN has (works for aerol.cloud, velox.aerol.ai, etc.)
+    @tunnel header_regexp subdomain Host ^(\d+)\.
+    handle @tunnel {
+        reverse_proxy velox:{re.subdomain.1} {
+            transport http {
+                read_timeout  0
+                write_timeout 0
+            }
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Real-IP       {remote_host}
+        }
     }
 
-    reverse_proxy localhost:{labels.4} {
-        transport http {
-            read_timeout  0
-            write_timeout 0
-        }
-        header_up X-Forwarded-For {remote_host}
-        header_up X-Real-IP       {remote_host}
+    # Non-numeric subdomains get a 404
+    handle {
+        respond "Not Found" 404
     }
 
     log {

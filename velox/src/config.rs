@@ -1,6 +1,6 @@
 use crate::tunnel::LocalProtocol;
 pub use hyper::http::{HeaderName, HeaderValue};
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio_rustls::rustls::pki_types::DnsName;
@@ -437,6 +437,17 @@ pub struct Server {
         verbatim_doc_comment,
     ))]
     pub remote_to_local_server_idle_timeout: Duration,
+
+    /// [Optional] Override the bind IP for all reverse tunnel listeners.
+    /// When set, the server ignores the host the client requested and binds
+    /// reverse tunnels on this IP instead. Use [::] or 0.0.0.0 when the
+    /// server runs behind a reverse proxy in a container.
+    /// Example: --reverse-tunnel-bind [::]
+    #[cfg_attr(
+        feature = "clap",
+        arg(long, value_name = "IP", verbatim_doc_comment, env = "VELOX_REVERSE_TUNNEL_BIND")
+    )]
+    pub reverse_tunnel_bind: Option<IpAddr>,
 
     /// [Optional] Bind address for the QUIC transport listener.
     /// When set, the server will also accept QUIC connections on this address.

@@ -584,6 +584,7 @@ async fn run_server_impl(
         restriction_config: args.restrict_config,
         http_proxy,
         remote_server_idle_timeout: args.remote_to_local_server_idle_timeout,
+        reverse_tunnel_bind: args.reverse_tunnel_bind,
         #[cfg(feature = "quic")]
         quic_bind: args.quic_bind,
         #[cfg(feature = "quic")]

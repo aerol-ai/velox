@@ -68,6 +68,10 @@ ENV SERVER_PORT="8080"
 # Set QUIC_BIND to a bind address to enable the QUIC listener, e.g. [::]:8443
 # Leave empty (default) to disable QUIC.
 ENV QUIC_BIND=""
+# Bind IP for reverse tunnel listeners. Default [::] (all interfaces) so
+# reverse-proxied containers (Caddy) can reach the tunnel ports.
+# Set to empty to disable the override (uses whatever the client requests).
+ENV VELOX_REVERSE_TUNNEL_BIND="[::]"
 # Extra CLI flags forwarded verbatim to `velox server …`.
 # Example: --restrict-to google.com:443 --restrict-config /etc/velox/restrictions.yaml
 ENV VELOX_EXTRA_ARGS=""
@@ -78,5 +82,5 @@ EXPOSE 8443/udp
 USER app
 
 ENTRYPOINT ["/usr/bin/dumb-init", "-v", "--"]
-# Conditionally append --quic-bind when QUIC_BIND is non-empty.
-CMD ["/bin/sh", "-c", "exec /home/app/velox server ${SERVER_PROTOCOL}://${SERVER_LISTEN}:${SERVER_PORT} ${QUIC_BIND:+--quic-bind $QUIC_BIND} ${VELOX_EXTRA_ARGS}"]
+# Conditionally append --quic-bind and --reverse-tunnel-bind when their env vars are non-empty.
+CMD ["/bin/sh", "-c", "exec /home/app/velox server ${SERVER_PROTOCOL}://${SERVER_LISTEN}:${SERVER_PORT} ${QUIC_BIND:+--quic-bind $QUIC_BIND} ${VELOX_REVERSE_TUNNEL_BIND:+--reverse-tunnel-bind $VELOX_REVERSE_TUNNEL_BIND} ${VELOX_EXTRA_ARGS}"]
